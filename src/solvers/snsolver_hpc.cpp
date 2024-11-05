@@ -20,7 +20,6 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     _numProcs = 1;    // default values
     _rank     = 0;
 #endif
-
     _settings       = settings;
     _currTime       = 0.0;
     _idx_start_iter = 0;
@@ -43,13 +42,15 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
         ErrorMessages::Error( "The number of processors must be less than or equal to the number of quadrature points.", CURRENT_FUNCTION );
     }
 
-    _localNSys   = _nq / _numProcs;
+    _localNSys   =  _nSys / _numProcs;//(_numProcs-1);
     _startSysIdx = _rank * _localNSys;
     _endSysIdx   = _rank * _localNSys + _localNSys;
     if( _rank == _numProcs - 1 ) {
-        _localNSys += _nq % _numProcs;
-        _endSysIdx = _nSys;
+       _localNSys = _nSys - _startSysIdx;
+       _endSysIdx = _nSys;
     }
+    
+    //std::cout << "Rank: " << _rank << " startSysIdx: " << _startSysIdx << " endSysIdx: " << _endSysIdx <<  " localNSys: " << _localNSys << std::endl;
 
     _spatialOrder  = _settings->GetSpatialOrder();
     _temporalOrder = _settings->GetTemporalOrder();
@@ -205,7 +206,8 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
 
         unsigned n_probes = 4;
         if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-        if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+        //if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+        
         _probingMoments = std::vector<double>( n_probes * 3, 0. );    // 10 time horizons
 
         if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
@@ -216,12 +218,12 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
                 _mesh->GetCellsofBall( 0., 0.5, 0.01 ),
             };
         }
-        else if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
-            _probingCellsHohlraum = {
-                _mesh->GetCellsofBall( 0.4, 0., 0.01 ),
-                _mesh->GetCellsofBall( 0., 0.5, 0.01 ),
-            };
-        }
+        //else if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
+        //    _probingCellsHohlraum = {
+        //        _mesh->GetCellsofBall( 0.4, 0., 0.01 ),
+        //        _mesh->GetCellsofBall( 0., 0.5, 0.01 ),
+        //    };
+        //}
 
         // Green
         _thicknessGreen = 0.05;
@@ -233,13 +235,13 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
             _cornerUpperRightGreen = { 0.2 + _centerGreen[0], 0.4 + _centerGreen[1] };
             _cornerLowerRightGreen = { 0.2 + _centerGreen[0], -0.4 + _centerGreen[1] };
         }
-        else {
-            _centerGreen           = { 0.0, 0.0 };
-            _cornerUpperLeftGreen  = { 0., 0.4 - _thicknessGreen / 2.0 };
-            _cornerLowerLeftGreen  = { 0., +_thicknessGreen / 2.0 };
-            _cornerUpperRightGreen = { 0.2 - _thicknessGreen / 2.0, 0.4 - _thicknessGreen / 2.0 };
-            _cornerLowerRightGreen = { 0.2 - _thicknessGreen / 2.0, 0. + _thicknessGreen / 2.0 };
-        }
+        //else {
+        //    _centerGreen           = { 0.0, 0.0 };
+        //    _cornerUpperLeftGreen  = { 0., 0.4 - _thicknessGreen / 2.0 };
+        //    _cornerLowerLeftGreen  = { 0., +_thicknessGreen / 2.0 };
+        //    _cornerUpperRightGreen = { 0.2 - _thicknessGreen / 2.0, 0.4 - _thicknessGreen / 2.0 };
+        //    _cornerLowerRightGreen = { 0.2 - _thicknessGreen / 2.0, 0. + _thicknessGreen / 2.0 };
+        //}
 
         _nProbingCellsLineGreen = _settings->GetNumProbingCellsLineHohlraum();
 
@@ -577,7 +579,7 @@ void SNSolverHPC::IterPostprocessing() {
             }
         }
 
-        if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum || _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
+        if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum){//} || _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
 
             double x = _cellMidPoints[Idx2D( idx_cell, 0, _nDim )];
             double y = _cellMidPoints[Idx2D( idx_cell, 1, _nDim )];
@@ -938,7 +940,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
             case TOTAL_PARTICLE_ABSORPTION_HORIZONTAL: _screenOutputFields[idx_field] = _totalAbsorptionHohlraumHorizontal; break;
             case PROBE_MOMENT_TIME_TRACE:
                 if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-                if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+                //if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
                 for( unsigned i = 0; i < n_probes; i++ ) {
                     _screenOutputFields[idx_field] = _probingMoments[Idx2D( i, 0, 3 )];
                     idx_field++;
@@ -993,7 +995,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
             case TOTAL_PARTICLE_ABSORPTION_HORIZONTAL: _historyOutputFields[idx_field] = _totalAbsorptionHohlraumHorizontal; break;
             case PROBE_MOMENT_TIME_TRACE:
                 if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-                if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+                //if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
                 for( unsigned i = 0; i < n_probes; i++ ) {
                     for( unsigned j = 0; j < 3; j++ ) {
                         _historyOutputFields[idx_field] = _probingMoments[Idx2D( i, j, 3 )];
@@ -1125,7 +1127,7 @@ void SNSolverHPC::PrepareHistoryOutput() {
             case TOTAL_PARTICLE_ABSORPTION_HORIZONTAL: _historyOutputFieldNames[idx_field] = "Cumulated_absorption_horizontal_wall"; break;
             case PROBE_MOMENT_TIME_TRACE:
                 if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-                if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+                //if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
                 for( unsigned i = 0; i < n_probes; i++ ) {
                     for( unsigned j = 0; j < 3; j++ ) {
                         _historyOutputFieldNames[idx_field] = "Probe " + std::to_string( i ) + " u_" + std::to_string( j );
@@ -1417,42 +1419,45 @@ void SNSolverHPC::SetGhostCells() {
 
 void SNSolverHPC::SetProbingCellsLineGreen() {
 
-    if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
-        double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
-        double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
-
-        // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-
-        unsigned nHorizontalProbingCells =
-            (unsigned)std::ceil( _nProbingCellsLineGreen * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
-        unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
-
-        _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
-
-        // Sample points on each side of the rectangle
-        std::vector<unsigned> side3 = linspace2D( _cornerLowerRightGreen, _cornerUpperRightGreen, nVerticalProbingCells );
-        std::vector<unsigned> side4 = linspace2D( _cornerUpperRightGreen, _cornerUpperLeftGreen, nHorizontalProbingCells );
-
-        //  Combine the points from each side
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
-    }
-    else if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
-        double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
-        double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
-
-        // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-
-        unsigned nHorizontalProbingCells =
-            (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
-        unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
-
-        _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
-
+    //if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
+    //    double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
+    //    double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
+    //
+    //    // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
+    //
+    //    unsigned nHorizontalProbingCells =
+    //        (unsigned)std::ceil( _nProbingCellsLineGreen * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
+    //    unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
+    //
+    //    _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
+    //
+    //    // Sample points on each side of the rectangle
+    //    std::vector<unsigned> side3 = linspace2D( _cornerLowerRightGreen, _cornerUpperRightGreen, nVerticalProbingCells );
+    //    std::vector<unsigned> side4 = linspace2D( _cornerUpperRightGreen, _cornerUpperLeftGreen, nHorizontalProbingCells );
+    //
+    //    //  Combine the points from each side
+    //    _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
+    //    _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
+    //}
+    //else
+    if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
+        
+        
         std::vector<double> p1 = { _cornerUpperLeftGreen[0] + _thicknessGreen / 2.0, _cornerUpperLeftGreen[1] - _thicknessGreen / 2.0 };
         std::vector<double> p2 = { _cornerLowerLeftGreen[0] + _thicknessGreen / 2.0, _cornerLowerLeftGreen[1] + _thicknessGreen / 2.0 };
         std::vector<double> p3 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
         std::vector<double> p4 = { _cornerLowerRightGreen[0] - _thicknessGreen / 2.0, _cornerLowerRightGreen[1] + _thicknessGreen / 2.0 };
+
+        double verticalLineWidth   = std::abs( p1[1] - p2[1]);
+        double horizontalLineWidth = std::abs( p1[0] - p3[0] );
+
+        double pt_ratio_h = horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth );
+        double pt_ratio_v = verticalLineWidth / ( horizontalLineWidth + verticalLineWidth );
+
+        unsigned nHorizontalProbingCells = (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * pt_ratio_h );
+        unsigned nVerticalProbingCells =  _nProbingCellsLineGreen / 2 - nHorizontalProbingCells;
+
+        _probingCellsLineGreen = std::vector<unsigned>( 2*(nVerticalProbingCells + nHorizontalProbingCells) );
 
         // Sample points on each side of the rectangle
         std::vector<unsigned> side1 = linspace2D( p1, p2, nVerticalProbingCells );
@@ -1460,12 +1465,21 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         std::vector<unsigned> side3 = linspace2D( p3, p4, nVerticalProbingCells );
         std::vector<unsigned> side4 = linspace2D( p4, p1, nHorizontalProbingCells );
 
-        //  Combine the points from each side
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side1.begin(), side1.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side2.begin(), side2.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
+        for ( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+                   _probingCellsLineGreen[i] = side1[i];
+        }
+        for ( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
+                      _probingCellsLineGreen[i+nVerticalProbingCells] = side2[i];
+        }
+        for ( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+                      _probingCellsLineGreen[i+nVerticalProbingCells+nHorizontalProbingCells] = side3[i];
+        }
+        for ( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
+                      _probingCellsLineGreen[i+2*nVerticalProbingCells+nHorizontalProbingCells] = side4[i];
+        }
 
+     
+   
         // Block-wise approach
         // Initialize the vector to store the corner points of each block
         std::vector<std::vector<std::vector<double>>> block_corners;
@@ -1552,7 +1566,7 @@ void SNSolverHPC::ComputeQOIsGreenProbingLine() {
 #pragma omp parallel for
     for( unsigned i = 0; i < _nProbingCellsLineGreen; i++ ) {    // Loop over probing cells
         _absorptionValsLineSegment[i] = ( _sigmaT[_probingCellsLineGreen[i]] - _sigmaS[_probingCellsLineGreen[i]] ) *
-                                        _scalarFlux[_probingCellsLineGreen[i]] * _areas[_probingCellsLineGreen[i]] / dl;
+                                        _scalarFlux[_probingCellsLineGreen[i]];
     }
 
     // Block-wise approach
