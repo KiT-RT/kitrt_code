@@ -443,8 +443,15 @@ void WriteConnecitivityToFile( const std::string outputFile,
     }
 }
 
-void WriteRestartSolution(
-    const std::string& baseOutputFile, const std::vector<double>& solution, const std::vector<double>& scalarFlux, int rank, int idx_iter ) {
+void WriteRestartSolution( const std::string& baseOutputFile,
+                           const std::vector<double>& solution,
+                           const std::vector<double>& scalarFlux,
+                           int rank,
+                           int idx_iter,
+                           double totalAbsorptionHohlraumCenter,
+                           double totalAbsorptionHohlraumVertical,
+                           double totalAbsorptionHohlraumHorizontal,
+                           double totalAbsorption ) {
     // Generate filename with rank number
     std::string outputFile = baseOutputFile + "_restart_rank_" + std::to_string( rank );
 
@@ -462,6 +469,10 @@ void WriteRestartSolution(
 
     // Write the iteration number as the first item (in binary)
     outFile.write( reinterpret_cast<const char*>( &idx_iter ), sizeof( idx_iter ) );
+    outFile.write( reinterpret_cast<const char*>( &totalAbsorptionHohlraumCenter ), sizeof( totalAbsorptionHohlraumCenter ) );
+    outFile.write( reinterpret_cast<const char*>( &totalAbsorptionHohlraumVertical ), sizeof( totalAbsorptionHohlraumVertical ) );
+    outFile.write( reinterpret_cast<const char*>( &totalAbsorptionHohlraumHorizontal ), sizeof( totalAbsorptionHohlraumHorizontal ) );
+    outFile.write( reinterpret_cast<const char*>( &totalAbsorption ), sizeof( totalAbsorption ) );
 
     // Write the size of the solution and scalarFlux vectors (optional but useful for reading)
     size_t solution_size   = solution.size();
@@ -479,8 +490,15 @@ void WriteRestartSolution(
     outFile.close();
 }
 
-int LoadRestartSolution(
-    const std::string& baseInputFile, std::vector<double>& solution, std::vector<double>& scalarFlux, int rank, unsigned long nCells ) {
+int LoadRestartSolution( const std::string& baseInputFile,
+                         std::vector<double>& solution,
+                         std::vector<double>& scalarFlux,
+                         int rank,
+                         unsigned long nCells,
+                         double& totalAbsorptionHohlraumCenter,
+                         double& totalAbsorptionHohlraumVertical,
+                         double& totalAbsorptionHohlraumHorizontal,
+                         double& totalAbsorption ) {
     // Generate filename with rank number
     std::string inputFile = baseInputFile + "_restart_rank_" + std::to_string( rank );
 
@@ -494,6 +512,10 @@ int LoadRestartSolution(
     // Read the iteration number
     int idx_iter = 0;
     inFile.read( reinterpret_cast<char*>( &idx_iter ), sizeof( idx_iter ) );
+    inFile.read( reinterpret_cast<char*>( &totalAbsorptionHohlraumCenter ), sizeof( totalAbsorptionHohlraumCenter ) );
+    inFile.read( reinterpret_cast<char*>( &totalAbsorptionHohlraumVertical ), sizeof( totalAbsorptionHohlraumVertical ) );
+    inFile.read( reinterpret_cast<char*>( &totalAbsorptionHohlraumHorizontal ), sizeof( totalAbsorptionHohlraumHorizontal ) );
+    inFile.read( reinterpret_cast<char*>( &totalAbsorption ), sizeof( totalAbsorption ) );
 
     // Read the size of the solution and scalarFlux vectors
     size_t solution_size, scalarFlux_size;

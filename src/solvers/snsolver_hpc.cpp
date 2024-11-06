@@ -169,26 +169,6 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
         // _mass += _scalarFlux[idx_cell] * _areas[idx_cell];
     }
 
-    if( _settings->GetLoadRestartSolution() )
-        _idx_start_iter = LoadRestartSolution( _settings->GetOutputFile(), _sol, _scalarFlux, _rank, _nCells ) + 1;
-
-#ifdef IMPORT_MPI
-    MPI_Barrier( MPI_COMM_WORLD );
-#endif
-    SetGhostCells();
-    if( _rank == 0 ) {
-        PrepareScreenOutput();     // Screen Output
-        PrepareHistoryOutput();    // History Output
-    }
-#ifdef IMPORT_MPI
-    MPI_Barrier( MPI_COMM_WORLD );
-#endif
-    delete quad;
-
-    // Initialiye QOIS
-    _mass    = 0;
-    _rmsFlux = 0;
-
     // Lattice
     {
         _curAbsorptionLattice    = 0;
@@ -212,6 +192,38 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
         _curAbsorptionHohlraumVertical     = 0;
         _curAbsorptionHohlraumHorizontal   = 0;
         _varAbsorptionHohlraumGreen        = 0;
+    }
+
+    if( _settings->GetLoadRestartSolution() )
+        _idx_start_iter = LoadRestartSolution( _settings->GetOutputFile(),
+                                               _sol,
+                                               _scalarFlux,
+                                               _rank,
+                                               _nCells,
+                                               _totalAbsorptionHohlraumCenter,
+                                               _totalAbsorptionHohlraumVertical,
+                                               _totalAbsorptionHohlraumHorizontal,
+                                               _totalAbsorptionLattice ) +
+                          1;
+
+#ifdef IMPORT_MPI
+    MPI_Barrier( MPI_COMM_WORLD );
+#endif
+    SetGhostCells();
+    if( _rank == 0 ) {
+        PrepareScreenOutput();     // Screen Output
+        PrepareHistoryOutput();    // History Output
+    }
+#ifdef IMPORT_MPI
+    MPI_Barrier( MPI_COMM_WORLD );
+#endif
+    delete quad;
+
+    // Initialiye QOIS
+    _mass    = 0;
+    _rmsFlux = 0;
+
+    {    // Hohlraum
 
         unsigned n_probes = 4;
         if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
@@ -1317,7 +1329,15 @@ void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
 void SNSolverHPC::PrintVolumeOutput( int idx_iter ) {
     if( _settings->GetSaveRestartSolutionFrequency() != 0 && idx_iter % (int)_settings->GetSaveRestartSolutionFrequency() == 0 ) {
         // std::cout << "Saving restart solution at iteration " << idx_iter << std::endl;
-        WriteRestartSolution( _settings->GetOutputFile(), _sol, _scalarFlux, _rank, idx_iter );
+        WriteRestartSolution( _settings->GetOutputFile(),
+                              _sol,
+                              _scalarFlux,
+                              _rank,
+                              idx_iter,
+                              _totalAbsorptionHohlraumCenter,
+                              _totalAbsorptionHohlraumVertical,
+                              _totalAbsorptionHohlraumHorizontal,
+                              _totalAbsorptionLattice );
     }
 
     if( _settings->GetVolumeOutputFrequency() != 0 && idx_iter % (int)_settings->GetVolumeOutputFrequency() == 0 ) {
@@ -1452,12 +1472,12 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
     if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
 
         std::vector<double> p1 = { _cornerUpperLeftGreen[0] + _thicknessGreen / 2.0, _cornerUpperLeftGreen[1] - _thicknessGreen / 2.0 };
-        std::vector<double> p2 = { _cornerLowerLeftGreen[0] + _thicknessGreen / 2.0, _cornerLowerLeftGreen[1] + _thicknessGreen / 2.0 };
-        std::vector<double> p3 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
-        std::vector<double> p4 = { _cornerLowerRightGreen[0] - _thicknessGreen / 2.0, _cornerLowerRightGreen[1] + _thicknessGreen / 2.0 };
+        std::vector<double> p2 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
+        std::vector<double> p3 = { _cornerLowerRightGreen[0] - _thicknessGreen / 2.0, _cornerLowerRightGreen[1] + _thicknessGreen / 2.0 };
+        std::vector<double> p4 = { _cornerLowerLeftGreen[0] + _thicknessGreen / 2.0, _cornerLowerLeftGreen[1] + _thicknessGreen / 2.0 };
 
-        double verticalLineWidth   = std::abs( p1[1] - p2[1] );
-        double horizontalLineWidth = std::abs( p1[0] - p3[0] );
+        double verticalLineWidth   = std::abs( p1[1] - p4[1] );
+        double horizontalLineWidth = std::abs( p1[0] - p2[0] );
 
         double pt_ratio_h = horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth );
         double pt_ratio_v = verticalLineWidth / ( horizontalLineWidth + verticalLineWidth );
@@ -1468,22 +1488,22 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         _probingCellsLineGreen = std::vector<unsigned>( 2 * ( nVerticalProbingCells + nHorizontalProbingCells ) );
 
         // Sample points on each side of the rectangle
-        std::vector<unsigned> side1 = linspace2D( p1, p2, nVerticalProbingCells );
-        std::vector<unsigned> side2 = linspace2D( p2, p3, nHorizontalProbingCells );
-        std::vector<unsigned> side3 = linspace2D( p3, p4, nVerticalProbingCells );
-        std::vector<unsigned> side4 = linspace2D( p4, p1, nHorizontalProbingCells );
+        std::vector<unsigned> side1 = linspace2D( p1, p2, nHorizontalProbingCells );    // upper horizontal
+        std::vector<unsigned> side2 = linspace2D( p2, p3, nVerticalProbingCells );      // right vertical
+        std::vector<unsigned> side3 = linspace2D( p3, p4, nHorizontalProbingCells );    // lower horizontal
+        std::vector<unsigned> side4 = linspace2D( p4, p1, nVerticalProbingCells );      // left vertical
 
-        for( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+        for( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
             _probingCellsLineGreen[i] = side1[i];
         }
-        for( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
-            _probingCellsLineGreen[i + nVerticalProbingCells] = side2[i];
-        }
         for( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+            _probingCellsLineGreen[i + nHorizontalProbingCells] = side2[i];
+        }
+        for( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
             _probingCellsLineGreen[i + nVerticalProbingCells + nHorizontalProbingCells] = side3[i];
         }
-        for( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
-            _probingCellsLineGreen[i + 2 * nVerticalProbingCells + nHorizontalProbingCells] = side4[i];
+        for( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+            _probingCellsLineGreen[i + nVerticalProbingCells + 2 * nHorizontalProbingCells] = side4[i];
         }
 
         // Block-wise approach
@@ -1493,7 +1513,7 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         double block_size = 0.05;
 
         // Loop to fill the blocks
-        for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal)
+        for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (upper) (left to right)
 
             // Top row
             double x1 = -0.2 + i * block_size;
@@ -1508,23 +1528,11 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
                 { x1, y2 }     // bottom-left
             };
             block_corners.push_back( corners );
-
-            // bottom row
-            y1 = -0.35;
-            y2 = y1 - block_size;
-
-            corners = {
-                { x1, y1 },    // top-left
-                { x2, y1 },    // top-right
-                { x2, y2 },    // bottom-right
-                { x1, y2 }     // bottom-left
-            };
-            block_corners.push_back( corners );
         }
-        for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical)
 
-            // left column
-            double x1 = -0.2;
+        for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical)
+            // right column double x1 = 0.15;
+            double x1 = 0.15;
             double y1 = 0.35 - j * block_size;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
@@ -1538,13 +1546,34 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
             };
 
             block_corners.push_back( corners );
+        }
 
-            // right column double x1 = 0.15;
-            x1 = 0.15;
-            x2 = x1 + block_size;
+        for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (lower) (right to left)
+            // bottom row
+            double x1 = 0.15 - i * block_size;
+            double y1 = -0.35;
+            double x2 = x1 + block_size;
+            double y2 = y1 - block_size;
+
+            std::vector<std::vector<double>> corners = {
+                { x1, y1 },    // top-left
+                { x2, y1 },    // top-right
+                { x2, y2 },    // bottom-right
+                { x1, y2 }     // bottom-left
+            };
+            block_corners.push_back( corners );
+        }
+
+        for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical) (down to up)
+
+            // left column
+            double x1 = -0.2;
+            double y1 = -0.35 + j * block_size;
+            double x2 = x1 + block_size;
+            double y2 = y1 - block_size;
 
             // Store the four corner points for this block
-            corners = {
+            std::vector<std::vector<double>> corners = {
                 { x1, y1 },    // top-left
                 { x2, y1 },    // top-right
                 { x2, y2 },    // bottom-right
