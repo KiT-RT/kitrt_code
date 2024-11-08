@@ -797,7 +797,9 @@ void SNSolverHPC::IterPostprocessing() {
 #endif
     }
     // probe values green
-    ComputeQOIsGreenProbingLine();
+    if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
+        ComputeQOIsGreenProbingLine();
+    }
     // Update time integral values on rank 0
     if( _rank == 0 ) {
         _totalScalarOutflow += _curScalarOutflow * _dT;
