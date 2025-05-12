@@ -1,4 +1,4 @@
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
 #include <mpi.h>
 #endif
 #include "common/config.hpp"
@@ -11,19 +11,18 @@
 #include "toolboxes/textprocessingtoolbox.hpp"
 
 SNSolverHPC::SNSolverHPC( Config* settings ) {
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
     // Initialize MPI
     MPI_Comm_size( MPI_COMM_WORLD, &_numProcs );
     MPI_Comm_rank( MPI_COMM_WORLD, &_rank );
 #endif
-#ifndef BUILD_MPI
+#ifndef IMPORT_MPI
     _numProcs = 1;    // default values
     _rank     = 0;
 #endif
-
-    _settings = settings;
-    _currTime = 0.0;
-
+    _settings       = settings;
+    _currTime       = 0.0;
+    _idx_start_iter = 0;
     _nOutputMoments = 2;    //  Currently only u_1 (x direction) and u_1 (y direction) are supported
     // Create Mesh
     _mesh = LoadSU2MeshFromFile( settings );
@@ -31,20 +30,36 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     auto quad = QuadratureBase::Create( settings );
     _settings->SetNQuadPoints( quad->GetNq() );
 
-    _nCells = _mesh->GetNumCells();
-    _nNbr   = _mesh->GetNumNodesPerCell();
-    _nDim   = _mesh->GetDim();
-    _nNodes = _mesh->GetNumNodes();
+    _nCells = static_cast<unsigned long>( _mesh->GetNumCells() );
+    _nNbr   = static_cast<unsigned long>( _mesh->GetNumNodesPerCell() );
+    _nDim   = static_cast<unsigned long>( _mesh->GetDim() );
+    _nNodes = static_cast<unsigned long>( _mesh->GetNumNodes() );
 
-    _nq          = quad->GetNq();
-    _nSys        = _nq;
-    _localNSys   = _nq / _numProcs;
-    _startSysIdx = _rank * _localNSys;
-    _endSysIdx   = _rank * _localNSys + _localNSys;
-    if( _rank == _numProcs - 1 ) {
-        _localNSys += _nq % _numProcs;
-        _endSysIdx = _nSys;
+    _nq   = static_cast<unsigned long>( quad->GetNq() );
+    _nSys = _nq;
+
+    if( _numProcs > _nq ) {
+        ErrorMessages::Error( "The number of processors must be less than or equal to the number of quadrature points.", CURRENT_FUNCTION );
     }
+
+    if( _numProcs == 1 ) {
+        _localNSys   = _nSys;
+        _startSysIdx = 0;
+        _endSysIdx   = _nSys;
+    }
+    else {
+        _localNSys   = _nSys / ( _numProcs - 1 );
+        _startSysIdx = _rank * _localNSys;
+        _endSysIdx   = _rank * _localNSys + _localNSys;
+
+        if( _rank == _numProcs - 1 ) {
+            _localNSys = _nSys - _startSysIdx;
+            _endSysIdx = _nSys;
+        }
+    }
+
+    // std::cout << "Rank: " << _rank << " startSysIdx: " << _startSysIdx << " endSysIdx: " << _endSysIdx <<  " localNSys: " << _localNSys <<
+    // std::endl;
 
     _spatialOrder  = _settings->GetSpatialOrder();
     _temporalOrder = _settings->GetTemporalOrder();
@@ -59,8 +74,8 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     _relativeCellVertices   = std::vector<double>( _nCells * _nNbr * _nDim );
 
     // Slope
-    _solDx   = std::vector<double>( _nCells * _localNSys * _nDim );
-    _limiter = std::vector<double>( _nCells * _localNSys );
+    _solDx   = std::vector<double>( _nCells * _localNSys * _nDim, 0.0 );
+    _limiter = std::vector<double>( _nCells * _localNSys, 0.0 );
 
     // Physics
     _sigmaS = std::vector<double>( _nCells );
@@ -87,7 +102,8 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     auto nodes           = _mesh->GetNodes();
     auto cells           = _mesh->GetCells();
 
-    for( unsigned idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
+#pragma omp parallel for
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
         _areas[idx_cell] = areas[idx_cell];
     }
 
@@ -105,27 +121,32 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     // Copy to everything to solver
     _mass = 0;
 #pragma omp parallel for
-    for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-        for( unsigned idx_dim = 0; idx_dim < _nDim; idx_dim++ ) {
+    for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+        for( unsigned long idx_dim = 0; idx_dim < _nDim; idx_dim++ ) {
             _quadPts[Idx2D( idx_sys, idx_dim, _nDim )] = quadPoints[idx_sys + _startSysIdx][idx_dim];
         }
-        _quadWeights[idx_sys] =
-            2.0 * quadWeights[idx_sys + _startSysIdx];    // Rescaling of quadweights TODO: Check if this needs general refactoring
+        if( _settings->GetQuadName() == QUAD_GaussLegendreTensorized2D ) {
+            _quadWeights[idx_sys] =
+                2.0 * quadWeights[idx_sys + _startSysIdx];    // Rescaling of quadweights TODO: Check if this needs general refactoring
+        }
+        else {
+            _quadWeights[idx_sys] = quadWeights[idx_sys + _startSysIdx];    // Rescaling of quadweights TODO: Check if this needs general refactoring}
+        }
     }
 
 #pragma omp parallel for
-    for( unsigned idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
         _cellBoundaryTypes[idx_cell] = boundaryTypes[idx_cell];
 
-        for( unsigned idx_dim = 0; idx_dim < _nDim; idx_dim++ ) {
+        for( unsigned long idx_dim = 0; idx_dim < _nDim; idx_dim++ ) {
             _cellMidPoints[Idx2D( idx_cell, idx_dim, _nDim )] = cellMidPts[idx_cell][idx_dim];
         }
 
-        for( unsigned idx_nbr = 0; idx_nbr < _nNbr; idx_nbr++ ) {
+        for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; idx_nbr++ ) {
 
             _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )] = neighbors[idx_cell][idx_nbr];
 
-            for( unsigned idx_dim = 0; idx_dim < _nDim; idx_dim++ ) {
+            for( unsigned long idx_dim = 0; idx_dim < _nDim; idx_dim++ ) {
                 _normals[Idx3D( idx_cell, idx_nbr, idx_dim, _nNbr, _nDim )]            = normals[idx_cell][idx_nbr][idx_dim];
                 _interfaceMidPoints[Idx3D( idx_cell, idx_nbr, idx_dim, _nNbr, _nDim )] = interfaceMidPts[idx_cell][idx_nbr][idx_dim];
                 _relativeInterfaceMidPt[Idx3D( idx_cell, idx_nbr, idx_dim, _nNbr, _nDim )] =
@@ -139,7 +160,7 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
         _sigmaT[idx_cell]     = sigmaT[0][idx_cell];
         _scalarFlux[idx_cell] = 0;
 
-        for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
             _source[Idx2D( idx_cell, idx_sys, _localNSys )] = source[0][idx_cell][0];    // CAREFUL HERE hardcoded to isotropic source
             _sol[Idx2D( idx_cell, idx_sys, _localNSys )]    = 0.0;                       // initial condition is zero
 
@@ -147,22 +168,6 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
         }
         // _mass += _scalarFlux[idx_cell] * _areas[idx_cell];
     }
-#ifdef BUILD_MPI
-    MPI_Barrier( MPI_COMM_WORLD );
-#endif
-    SetGhostCells();
-    if( _rank == 0 ) {
-        PrepareScreenOutput();     // Screen Output
-        PrepareHistoryOutput();    // History Output
-    }
-#ifdef BUILD_MPI
-    MPI_Barrier( MPI_COMM_WORLD );
-#endif
-    delete quad;
-
-    // Initialiye QOIS
-    _mass    = 0;
-    _rmsFlux = 0;
 
     // Lattice
     {
@@ -187,11 +192,43 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
         _curAbsorptionHohlraumVertical     = 0;
         _curAbsorptionHohlraumHorizontal   = 0;
         _varAbsorptionHohlraumGreen        = 0;
+    }
+
+    if( _settings->GetLoadRestartSolution() )
+        _idx_start_iter = LoadRestartSolution( _settings->GetOutputFile(),
+                                               _sol,
+                                               _scalarFlux,
+                                               _rank,
+                                               _nCells,
+                                               _totalAbsorptionHohlraumCenter,
+                                               _totalAbsorptionHohlraumVertical,
+                                               _totalAbsorptionHohlraumHorizontal,
+                                               _totalAbsorptionLattice ) +
+                          1;
+
+#ifdef IMPORT_MPI
+    MPI_Barrier( MPI_COMM_WORLD );
+#endif
+    SetGhostCells();
+    if( _rank == 0 ) {
+        PrepareScreenOutput();     // Screen Output
+        PrepareHistoryOutput();    // History Output
+    }
+#ifdef IMPORT_MPI
+    MPI_Barrier( MPI_COMM_WORLD );
+#endif
+    delete quad;
+
+    // Initialiye QOIS
+    _mass    = 0;
+    _rmsFlux = 0;
+
+    {    // Hohlraum
 
         unsigned n_probes = 4;
         if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-        if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
-        //_probingMomentsTimeIntervals = 10;
+        // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+
         _probingMoments = std::vector<double>( n_probes * 3, 0. );    // 10 time horizons
 
         if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
@@ -202,12 +239,12 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
                 _mesh->GetCellsofBall( 0., 0.5, 0.01 ),
             };
         }
-        else if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
-            _probingCellsHohlraum = {
-                _mesh->GetCellsofBall( 0.4, 0., 0.01 ),
-                _mesh->GetCellsofBall( 0., 0.5, 0.01 ),
-            };
-        }
+        // else if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
+        //     _probingCellsHohlraum = {
+        //         _mesh->GetCellsofBall( 0.4, 0., 0.01 ),
+        //         _mesh->GetCellsofBall( 0., 0.5, 0.01 ),
+        //     };
+        // }
 
         // Green
         _thicknessGreen = 0.05;
@@ -219,20 +256,21 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
             _cornerUpperRightGreen = { 0.2 + _centerGreen[0], 0.4 + _centerGreen[1] };
             _cornerLowerRightGreen = { 0.2 + _centerGreen[0], -0.4 + _centerGreen[1] };
         }
-        else {
-            _centerGreen           = { 0.0, 0.0 };
-            _cornerUpperLeftGreen  = { 0., 0.4 - _thicknessGreen / 2.0 };
-            _cornerLowerLeftGreen  = { 0., +_thicknessGreen / 2.0 };
-            _cornerUpperRightGreen = { 0.2 - _thicknessGreen / 2.0, 0.4 - _thicknessGreen / 2.0 };
-            _cornerLowerRightGreen = { 0.2 - _thicknessGreen / 2.0, 0. + _thicknessGreen / 2.0 };
-        }
+        // else {
+        //     _centerGreen           = { 0.0, 0.0 };
+        //     _cornerUpperLeftGreen  = { 0., 0.4 - _thicknessGreen / 2.0 };
+        //     _cornerLowerLeftGreen  = { 0., +_thicknessGreen / 2.0 };
+        //     _cornerUpperRightGreen = { 0.2 - _thicknessGreen / 2.0, 0.4 - _thicknessGreen / 2.0 };
+        //     _cornerLowerRightGreen = { 0.2 - _thicknessGreen / 2.0, 0. + _thicknessGreen / 2.0 };
+        // }
 
         _nProbingCellsLineGreen = _settings->GetNumProbingCellsLineHohlraum();
 
-        SetProbingCellsLineGreen();    // ONLY FOR HOHLRAUM
+        _nProbingCellsBlocksGreen  = 44;
+        _absorptionValsBlocksGreen = std::vector<double>( _nProbingCellsBlocksGreen, 0. );
+        _absorptionValsLineSegment = std::vector<double>( _nProbingCellsLineGreen, 0.0 );
 
-        _absorptionValsIntegrated    = std::vector<double>( _nProbingCellsLineGreen, 0.0 );
-        _varAbsorptionValsIntegrated = std::vector<double>( _nProbingCellsLineGreen, 0.0 );
+        SetProbingCellsLineGreen();    // ONLY FOR HOHLRAUM
     }
 }
 
@@ -253,7 +291,8 @@ void SNSolverHPC::Solve() {
 
     std::chrono::duration<double> duration;
     // Loop over energies (pseudo-time of continuous slowing down approach)
-    for( unsigned iter = 0; iter < _nIter; iter++ ) {
+    for( unsigned iter = (unsigned)_idx_start_iter; iter < _nIter; iter++ ) {
+
         if( iter == _nIter - 1 ) {    // last iteration
             _dT = _settings->GetTEnd() - iter * _dT;
         }
@@ -264,9 +303,9 @@ void SNSolverHPC::Solve() {
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
             FVMUpdate();
 #pragma omp parallel for
-            for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+            for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 #pragma omp simd
-                for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                     _sol[Idx2D( idx_cell, idx_sys, _localNSys )] =
                         0.5 * ( solRK0[Idx2D( idx_cell, idx_sys, _localNSys )] +
                                 _sol[Idx2D( idx_cell, idx_sys, _localNSys )] );    // Solution averaging with HEUN
@@ -274,6 +313,7 @@ void SNSolverHPC::Solve() {
             }
         }
         else {
+
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
             FVMUpdate();
         }
@@ -292,24 +332,19 @@ void SNSolverHPC::Solve() {
             // --- Print Output ---
             PrintScreenOutput( iter );
             PrintHistoryOutput( iter );
-            PrintVolumeOutput( iter );
         }
-    }
+#ifdef BUILD_MPI
+        MPI_Barrier( MPI_COMM_WORLD );
+#endif
 
+        PrintVolumeOutput( iter );
+#ifdef BUILD_MPI
+        MPI_Barrier( MPI_COMM_WORLD );
+#endif
+    }
     // --- Postprocessing ---
     if( _rank == 0 ) {
         DrawPostSolverOutput();
-    }
-}
-
-void SNSolverHPC::PrintVolumeOutput( int idx_iter ) {
-    if( _settings->GetVolumeOutputFrequency() != 0 && idx_iter % (unsigned)_settings->GetVolumeOutputFrequency() == 0 ) {
-        WriteVolumeOutput( idx_iter );
-        ExportVTK( _settings->GetOutputFile() + "_" + std::to_string( idx_iter ), _outputFields, _outputFieldNames, _mesh );    // slow
-    }
-    if( idx_iter == (int)_nIter - 1 ) {    // Last iteration write without suffix.
-        WriteVolumeOutput( idx_iter );
-        ExportVTK( _settings->GetOutputFile(), _outputFields, _outputFieldNames, _mesh );
     }
 }
 
@@ -318,53 +353,48 @@ void SNSolverHPC::FluxOrder2() {
     double const eps = 1e-10;
 
 #pragma omp parallel for
-    for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {     // Compute Slopes
-        if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NONE ) {    // skip ghost cells
-#pragma omp simd
-            for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-
-                _limiter[Idx2D( idx_cell, idx_sys, _localNSys )] = 1.;    // limiter should be zero at boundary
-
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {            // Compute Slopes
+        if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NONE ) {                // skip ghost cells
+                                                                                   // #pragma omp simd
+            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {    //
+                _limiter[Idx2D( idx_cell, idx_sys, _localNSys )]         = 1.;     // limiter should be zero at boundary//
                 _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] = 0.;
-                _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] = 0.;
-
-                double solInterfaceAvg = 0.0;
-                for( unsigned idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {    // Compute slopes and mininum and maximum
-                    unsigned idx_nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];
-
+                _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] = 0.;    //
+                double solInterfaceAvg                                   = 0.0;
+                for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {            // Compute slopes and mininum and maximum
+                    unsigned nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    //
                     // Slopes
-                    solInterfaceAvg = 0.5 * ( _sol[Idx2D( idx_cell, idx_sys, _localNSys )] + _sol[Idx2D( idx_nbr_glob, idx_sys, _localNSys )] );
+                    solInterfaceAvg = 0.5 * ( _sol[Idx2D( idx_cell, idx_sys, _localNSys )] + _sol[Idx2D( nbr_glob, idx_sys, _localNSys )] );
                     _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] +=
                         solInterfaceAvg * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )];
                     _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] +=
                         solInterfaceAvg * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-                }
-
+                }    //
                 _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] /= _areas[idx_cell];
                 _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] /= _areas[idx_cell];
             }
         }
     }
 #pragma omp parallel for
-    for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {     // Compute Limiter
-        if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NONE ) {    // skip ghost cells
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {    // Compute Limiter
+        if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NONE ) {        // skip ghost cells
 
 #pragma omp simd
-            for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
 
                 double gaussPoint = 0;
                 double r          = 0;
                 double minSol     = _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
                 double maxSol     = _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
 
-                for( unsigned idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {    // Compute slopes and mininum and maximum
-                    unsigned idx_nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];
+                for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {    // Compute slopes and mininum and maximum
+                    unsigned nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];
                     // Compute ptswise max and minimum solultion values of current and neighbor cells
-                    maxSol = std::max( _sol[Idx2D( idx_nbr_glob, idx_sys, _localNSys )], maxSol );
-                    minSol = std::min( _sol[Idx2D( idx_nbr_glob, idx_sys, _localNSys )], minSol );
+                    maxSol = std::max( _sol[Idx2D( nbr_glob, idx_sys, _localNSys )], maxSol );
+                    minSol = std::min( _sol[Idx2D( nbr_glob, idx_sys, _localNSys )], minSol );
                 }
 
-                for( unsigned idx_nbr = 0; idx_nbr < _nNbr; idx_nbr++ ) {    // Compute limiter, see https://arxiv.org/pdf/1710.07187.pdf
+                for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; idx_nbr++ ) {    // Compute limiter, see https://arxiv.org/pdf/1710.07187.pdf
 
                     // Compute test value at cell vertex, called gaussPt
                     gaussPoint =
@@ -398,26 +428,25 @@ void SNSolverHPC::FluxOrder2() {
         }
         else {
 #pragma omp simd
-            for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                 _limiter[Idx2D( idx_cell, idx_sys, _localNSys )]         = 0.;    // limiter should be zero at boundary
                 _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] = 0.;
                 _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] = 0.;
             }
         }
     }
-
 #pragma omp parallel for
-    for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {    // Compute Flux
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {    // Compute Flux
 #pragma omp simd
-        for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
             _flux[Idx2D( idx_cell, idx_sys, _localNSys )] = 0.;
         }
 
         // Fluxes
-        for( unsigned idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
+        for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
             if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NEUMANN && _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )] == _nCells ) {
-#pragma omp simd
-                for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                // #pragma omp simd
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                     double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
                                         _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
                     if( localInner > 0 ) {
@@ -430,12 +459,13 @@ void SNSolverHPC::FluxOrder2() {
                 }
             }
             else {
-// Second order
+
+                unsigned long nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    // global idx of neighbor cell
+                                                                                           // Second order
 #pragma omp simd
-                for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                     // store flux contribution on psiNew_sigmaS to save memory
-                    unsigned idx_nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    // global idx of neighbor cell
-                    double localInner     = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
+                    double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
                                         _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
 
                     _flux[Idx2D( idx_cell, idx_sys, _localNSys )] +=
@@ -445,14 +475,14 @@ void SNSolverHPC::FluxOrder2() {
                                                                       _relativeInterfaceMidPt[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
                                                                   _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] *
                                                                       _relativeInterfaceMidPt[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )] ) )
-                                           : localInner * ( _sol[Idx2D( idx_nbr_glob, idx_sys, _localNSys )] +
-                                                            _limiter[Idx2D( idx_nbr_glob, idx_sys, _localNSys )] *
-                                                                ( _solDx[Idx3D( idx_nbr_glob, idx_sys, 0, _localNSys, _nDim )] *
+                                           : localInner * ( _sol[Idx2D( nbr_glob, idx_sys, _localNSys )] +
+                                                            _limiter[Idx2D( nbr_glob, idx_sys, _localNSys )] *
+                                                                ( _solDx[Idx3D( nbr_glob, idx_sys, 0, _localNSys, _nDim )] *
                                                                       ( _interfaceMidPoints[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] -
-                                                                        _cellMidPoints[Idx2D( idx_nbr_glob, 0, _nDim )] ) +
-                                                                  _solDx[Idx3D( idx_nbr_glob, idx_sys, 1, _localNSys, _nDim )] *
+                                                                        _cellMidPoints[Idx2D( nbr_glob, 0, _nDim )] ) +
+                                                                  _solDx[Idx3D( nbr_glob, idx_sys, 1, _localNSys, _nDim )] *
                                                                       ( _interfaceMidPoints[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )] -
-                                                                        _cellMidPoints[Idx2D( idx_nbr_glob, 1, _nDim )] ) ) );
+                                                                        _cellMidPoints[Idx2D( nbr_glob, 1, _nDim )] ) ) );
                 }
             }
         }
@@ -462,18 +492,18 @@ void SNSolverHPC::FluxOrder2() {
 void SNSolverHPC::FluxOrder1() {
 
 #pragma omp parallel for
-    for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 
 #pragma omp simd
-        for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
             _flux[Idx2D( idx_cell, idx_sys, _localNSys )] = 0.0;    // Reset temporary variable
         }
 
         // Fluxes
-        for( unsigned idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
+        for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
             if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NEUMANN && _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )] == _nCells ) {
 #pragma omp simd
-                for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                     double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
                                         _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
                     if( localInner > 0 ) {
@@ -486,9 +516,9 @@ void SNSolverHPC::FluxOrder1() {
                 }
             }
             else {
-                unsigned nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    // global idx of neighbor cell
+                unsigned long nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    // global idx of neighbor cell
 #pragma omp simd
-                for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
 
                     double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
                                         _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
@@ -507,10 +537,10 @@ void SNSolverHPC::FVMUpdate() {
     std::vector<double> temp_scalarFlux( _nCells );    // for MPI allreduce
 
 #pragma omp parallel for reduction( + : _mass, _rmsFlux )
-    for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 
 #pragma omp simd
-        for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
             // Update
             _sol[Idx2D( idx_cell, idx_sys, _localNSys )] =
                 ( 1 - _dT * _sigmaT[idx_cell] ) * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] -
@@ -520,7 +550,7 @@ void SNSolverHPC::FVMUpdate() {
         double localScalarFlux = 0;
 
 #pragma omp simd reduction( + : localScalarFlux )
-        for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
             _sol[Idx2D( idx_cell, idx_sys, _localNSys )] = std::max( _sol[Idx2D( idx_cell, idx_sys, _localNSys )], 0.0 );
             localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
         }
@@ -529,12 +559,12 @@ void SNSolverHPC::FVMUpdate() {
         temp_scalarFlux[idx_cell] = localScalarFlux;    // set flux
     }
 // MPI Allreduce: _scalarFlux
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( temp_scalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     MPI_Barrier( MPI_COMM_WORLD );
 #endif
-#ifndef BUILD_MPI
+#ifndef IMPORT_MPI
     _scalarFlux = temp_scalarFlux;
 #endif
 }
@@ -560,7 +590,7 @@ void SNSolverHPC::IterPostprocessing() {
                                         _curAbsorptionHohlraumVertical,                                                                              \
                                         _curAbsorptionHohlraumHorizontal,                                                                            \
                                         a_g ) reduction( max : _curMaxOrdinateOutflow, _curMaxAbsorptionLattice )
-    for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 
         if( _settings->GetProblemName() == PROBLEM_Lattice || _settings->GetProblemName() == PROBLEM_HalfLattice ) {
             if( IsAbsorptionLattice( _cellMidPoints[Idx2D( idx_cell, 0, _nDim )], _cellMidPoints[Idx2D( idx_cell, 1, _nDim )] ) ) {
@@ -570,7 +600,7 @@ void SNSolverHPC::IterPostprocessing() {
             }
         }
 
-        if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum || _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
+        if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {    //} || _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
 
             double x = _cellMidPoints[Idx2D( idx_cell, 0, _nDim )];
             double y = _cellMidPoints[Idx2D( idx_cell, 1, _nDim )];
@@ -603,16 +633,17 @@ void SNSolverHPC::IterPostprocessing() {
             bool green4 = x > 0.15 + _settings->GetPosXCenterGreenHohlraum() && x < 0.2 + _settings->GetPosXCenterGreenHohlraum() &&
                           y > -0.35 + _settings->GetPosYCenterGreenHohlraum() && y < 0.35 + _settings->GetPosYCenterGreenHohlraum();
             if( green1 || green2 || green3 || green4 ) {
-                a_g += ( _sigmaT[idx_cell] - _sigmaS[idx_cell] ) * _scalarFlux[idx_cell] * _areas[idx_cell];
+                a_g += ( _sigmaT[idx_cell] - _sigmaS[idx_cell] ) * _scalarFlux[idx_cell] * _areas[idx_cell] /
+                       ( 44 * 0.05 * 0.05 );    // divisor is area of the green
             }
         }
 
         if( _settings->GetProblemName() == PROBLEM_Lattice ) {
             // Outflow out of inner and middle perimeter
             if( _isPerimeterLatticeCell1[idx_cell] ) {    // inner
-                for( unsigned idx_nbr_helper = 0; idx_nbr_helper < _cellsLatticePerimeter1[idx_cell].size(); ++idx_nbr_helper ) {
+                for( unsigned long idx_nbr_helper = 0; idx_nbr_helper < _cellsLatticePerimeter1[idx_cell].size(); ++idx_nbr_helper ) {
 #pragma omp simd reduction( + : _curScalarOutflowPeri1 )
-                    for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                    for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                         double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] *
                                                 _normals[Idx3D( idx_cell, _cellsLatticePerimeter1[idx_cell][idx_nbr_helper], 0, _nNbr, _nDim )] +
                                             _quadPts[Idx2D( idx_sys, 1, _nDim )] *
@@ -627,9 +658,9 @@ void SNSolverHPC::IterPostprocessing() {
                 }
             }
             if( _isPerimeterLatticeCell2[idx_cell] ) {    // middle
-                for( unsigned idx_nbr_helper = 0; idx_nbr_helper < _cellsLatticePerimeter2[idx_cell].size(); ++idx_nbr_helper ) {
+                for( unsigned long idx_nbr_helper = 0; idx_nbr_helper < _cellsLatticePerimeter2[idx_cell].size(); ++idx_nbr_helper ) {
 #pragma omp simd reduction( + : _curScalarOutflowPeri2 )
-                    for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                    for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
                         double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] *
                                                 _normals[Idx3D( idx_cell, _cellsLatticePerimeter2[idx_cell][idx_nbr_helper], 0, _nNbr, _nDim )] +
                                             _quadPts[Idx2D( idx_sys, 1, _nDim )] *
@@ -649,11 +680,11 @@ void SNSolverHPC::IterPostprocessing() {
             // Iterate over face cell faces
             double currOrdinatewiseOutflow = 0.0;
 
-            for( unsigned idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
+            for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
                 // Find face that points outward
                 if( _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )] == _nCells ) {
 #pragma omp simd reduction( + : _curScalarOutflow ) reduction( max : _curMaxOrdinateOutflow )
-                    for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                    for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
 
                         double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
                                             _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
@@ -678,7 +709,7 @@ void SNSolverHPC::IterPostprocessing() {
         }
     }
 // MPI Allreduce
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
     double tmp_curScalarOutflow      = 0.0;
     double tmp_curScalarOutflowPeri1 = 0.0;
     double tmp_curScalarOutflowPeri2 = 0.0;
@@ -707,7 +738,7 @@ void SNSolverHPC::IterPostprocessing() {
         std::vector<double> temp_probingMoments( 3 * n_probes );    // for MPI allreduce
 
 #pragma omp parallel for reduction( + : _varAbsorptionHohlraumGreen )
-        for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+        for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
             double x = _cellMidPoints[Idx2D( idx_cell, 0, _nDim )];
             double y = _cellMidPoints[Idx2D( idx_cell, 1, _nDim )];
 
@@ -730,15 +761,15 @@ void SNSolverHPC::IterPostprocessing() {
         }
         // Probes value moments
         // #pragma omp parallel for
-        for( unsigned idx_probe = 0; idx_probe < n_probes; idx_probe++ ) {    // Loop over probing cells
+        for( unsigned long idx_probe = 0; idx_probe < n_probes; idx_probe++ ) {    // Loop over probing cells
             temp_probingMoments[Idx2D( idx_probe, 0, 3 )] = 0.0;
             temp_probingMoments[Idx2D( idx_probe, 1, 3 )] = 0.0;
             temp_probingMoments[Idx2D( idx_probe, 2, 3 )] = 0.0;
-            // for( unsigned idx_ball = 0; idx_ball < _probingCellsHohlraum[idx_probe].size(); idx_ball++ ) {
+            // for( unsigned long idx_ball = 0; idx_ball < _probingCellsHohlraum[idx_probe].size(); idx_ball++ ) {
             //   std::cout << idx_ball << _areas[_probingCellsHohlraum[idx_probe][idx_ball]] / ( 0.01 * 0.01 * M_PI ) << std::endl;
             //}
-            for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                for( unsigned idx_ball = 0; idx_ball < _probingCellsHohlraum[idx_probe].size(); idx_ball++ ) {
+            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                for( unsigned long idx_ball = 0; idx_ball < _probingCellsHohlraum[idx_probe].size(); idx_ball++ ) {
                     temp_probingMoments[Idx2D( idx_probe, 0, 3 )] += _sol[Idx2D( _probingCellsHohlraum[idx_probe][idx_ball], idx_sys, _localNSys )] *
                                                                      _quadWeights[idx_sys] * _areas[_probingCellsHohlraum[idx_probe][idx_ball]] /
                                                                      ( 0.01 * 0.01 * M_PI );
@@ -752,22 +783,23 @@ void SNSolverHPC::IterPostprocessing() {
             }
         }
 
-        // probe values green
-        ComputeQOIsGreenProbingLine();
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
         MPI_Barrier( MPI_COMM_WORLD );
         MPI_Allreduce( temp_probingMoments.data(), _probingMoments.data(), 3 * n_probes, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
         MPI_Barrier( MPI_COMM_WORLD );
 #endif
-#ifndef BUILD_MPI
-        for( unsigned idx_probe = 0; idx_probe < n_probes; idx_probe++ ) {    // Loop over probing cells
+#ifndef IMPORT_MPI
+        for( unsigned long idx_probe = 0; idx_probe < n_probes; idx_probe++ ) {    // Loop over probing cells
             _probingMoments[Idx2D( idx_probe, 0, 3 )] = temp_probingMoments[Idx2D( idx_probe, 0, 3 )];
             _probingMoments[Idx2D( idx_probe, 1, 3 )] = temp_probingMoments[Idx2D( idx_probe, 1, 3 )];
             _probingMoments[Idx2D( idx_probe, 2, 3 )] = temp_probingMoments[Idx2D( idx_probe, 2, 3 )];
         }
 #endif
     }
-
+    // probe values green
+    if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
+        ComputeQOIsGreenProbingLine();
+    }
     // Update time integral values on rank 0
     if( _rank == 0 ) {
         _totalScalarOutflow += _curScalarOutflow * _dT;
@@ -820,7 +852,9 @@ double SNSolverHPC::ComputeTimeStep( double cfl ) const {
     }
     // 2D case
     double charSize = __DBL_MAX__;    // minimum char size of all mesh cells in the mesh
-    for( unsigned j = 0; j < _nCells; j++ ) {
+
+#pragma omp parallel for reduction( min : charSize )
+    for( unsigned long j = 0; j < _nCells; j++ ) {
         double currCharSize = sqrt( _areas[j] );
         if( currCharSize < charSize ) {
             charSize = currCharSize;
@@ -880,6 +914,7 @@ void SNSolverHPC::PrepareScreenOutput() {
                 }
                 break;
             case VAR_ABSORPTION_GREEN: _screenOutputFieldNames[idx_field] = "Var. absorption green"; break;
+
             default: ErrorMessages::Error( "Screen output field not defined!", CURRENT_FUNCTION ); break;
         }
     }
@@ -928,14 +963,14 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
             case TOTAL_PARTICLE_ABSORPTION_HORIZONTAL: _screenOutputFields[idx_field] = _totalAbsorptionHohlraumHorizontal; break;
             case PROBE_MOMENT_TIME_TRACE:
                 if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-                if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+                // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
                 for( unsigned i = 0; i < n_probes; i++ ) {
                     _screenOutputFields[idx_field] = _probingMoments[Idx2D( i, 0, 3 )];
                     idx_field++;
                 }
                 idx_field--;
                 break;
-            case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _varAbsorptionHohlraumGreen; break;
+            case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _absorptionValsBlocksGreen[0]; break;
             default: ErrorMessages::Error( "Screen output group not defined!", CURRENT_FUNCTION ); break;
         }
     }
@@ -983,7 +1018,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
             case TOTAL_PARTICLE_ABSORPTION_HORIZONTAL: _historyOutputFields[idx_field] = _totalAbsorptionHohlraumHorizontal; break;
             case PROBE_MOMENT_TIME_TRACE:
                 if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-                if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+                // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
                 for( unsigned i = 0; i < n_probes; i++ ) {
                     for( unsigned j = 0; j < 3; j++ ) {
                         _historyOutputFields[idx_field] = _probingMoments[Idx2D( i, j, 3 )];
@@ -993,9 +1028,17 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
                 idx_field--;
                 break;
             case VAR_ABSORPTION_GREEN: _historyOutputFields[idx_field] = _varAbsorptionHohlraumGreen; break;
-            case VAR_ABSORPTION_GREEN_LINE:
+            case ABSORPTION_GREEN_LINE:
                 for( unsigned i = 0; i < _settings->GetNumProbingCellsLineHohlraum(); i++ ) {
-                    _historyOutputFieldNames[idx_field] = _varAbsorptionValsIntegrated[i];
+                    _historyOutputFields[idx_field] = _absorptionValsLineSegment[i];
+                    idx_field++;
+                }
+                idx_field--;
+                break;
+            case ABSORPTION_GREEN_BLOCK:
+                for( unsigned i = 0; i < 44; i++ ) {
+                    _historyOutputFields[idx_field] = _absorptionValsBlocksGreen[i];
+                    // std::cout << _absorptionValsBlocksGreen[i] << "/" << _historyOutputFields[idx_field] << std::endl;
                     idx_field++;
                 }
                 idx_field--;
@@ -1037,7 +1080,8 @@ void SNSolverHPC::PrintScreenOutput( unsigned idx_iter ) {
                                                         TOTAL_PARTICLE_ABSORPTION_HORIZONTAL,
                                                         PROBE_MOMENT_TIME_TRACE,
                                                         VAR_ABSORPTION_GREEN,
-                                                        VAR_ABSORPTION_GREEN_LINE };
+                                                        ABSORPTION_GREEN_BLOCK,
+                                                        ABSORPTION_GREEN_LINE };
         std::vector<SCALAR_OUTPUT> booleanFields    = { VTK_OUTPUT, CSV_OUTPUT };
 
         if( !( integerFields.end() == std::find( integerFields.begin(), integerFields.end(), _settings->GetScreenOutput()[idx_field] ) ) ) {
@@ -1106,7 +1150,7 @@ void SNSolverHPC::PrepareHistoryOutput() {
             case TOTAL_PARTICLE_ABSORPTION_HORIZONTAL: _historyOutputFieldNames[idx_field] = "Cumulated_absorption_horizontal_wall"; break;
             case PROBE_MOMENT_TIME_TRACE:
                 if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) n_probes = 4;
-                if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
+                // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) n_probes = 2;
                 for( unsigned i = 0; i < n_probes; i++ ) {
                     for( unsigned j = 0; j < 3; j++ ) {
                         _historyOutputFieldNames[idx_field] = "Probe " + std::to_string( i ) + " u_" + std::to_string( j );
@@ -1116,7 +1160,15 @@ void SNSolverHPC::PrepareHistoryOutput() {
                 idx_field--;
                 break;
             case VAR_ABSORPTION_GREEN: _historyOutputFieldNames[idx_field] = "Var. absorption green"; break;
-            case VAR_ABSORPTION_GREEN_LINE:
+            case ABSORPTION_GREEN_BLOCK:
+                for( unsigned i = 0; i < 44; i++ ) {
+                    _historyOutputFieldNames[idx_field] = "Probe Green Block " + std::to_string( i );
+                    idx_field++;
+                }
+                idx_field--;
+                break;
+
+            case ABSORPTION_GREEN_LINE:
                 for( unsigned i = 0; i < _settings->GetNumProbingCellsLineHohlraum(); i++ ) {
                     _historyOutputFieldNames[idx_field] = "Probe Green Line " + std::to_string( i );
                     idx_field++;
@@ -1144,9 +1196,9 @@ void SNSolverHPC::PrintHistoryOutput( unsigned idx_iter ) {
         }
         lineToPrint += tmp + ",";
     }
-    tmp = TextProcessingToolbox::DoubleToScientificNotation( _historyOutputFields[_settings->GetNScreenOutput() - 1] );
+    tmp = TextProcessingToolbox::DoubleToScientificNotation( _historyOutputFields[_settings->GetNHistoryOutput() - 1] );
     lineToPrint += tmp;    // Last element without comma
-
+    // std::cout << lineToPrint << std::endl;
     if( _settings->GetHistoryOutputFrequency() != 0 && idx_iter % (unsigned)_settings->GetHistoryOutputFrequency() == 0 ) {
         log->info( lineToPrint );
     }
@@ -1231,9 +1283,9 @@ void SNSolverHPC::DrawPostSolverOutput() {
     log->info( "--------------------------- Solver Finished ----------------------------" );
 }
 
-unsigned SNSolverHPC::Idx2D( unsigned idx1, unsigned idx2, unsigned len2 ) { return idx1 * len2 + idx2; }
+unsigned long SNSolverHPC::Idx2D( unsigned long idx1, unsigned long idx2, unsigned long len2 ) { return idx1 * len2 + idx2; }
 
-unsigned SNSolverHPC::Idx3D( unsigned idx1, unsigned idx2, unsigned idx3, unsigned len2, unsigned len3 ) {
+unsigned long SNSolverHPC::Idx3D( unsigned long idx1, unsigned long idx2, unsigned long idx3, unsigned long len2, unsigned long len3 ) {
     return ( idx1 * len2 + idx2 ) * len3 + idx3;
 }
 
@@ -1244,9 +1296,9 @@ void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
         for( unsigned idx_group = 0; idx_group < nGroups; idx_group++ ) {
             switch( _settings->GetVolumeOutput()[idx_group] ) {
                 case MINIMAL:
-                    // for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-                    _outputFields[idx_group][0] = _scalarFlux;    //[idx_cell];
-                    //}
+                    if( _rank == 0 ) {
+                        _outputFields[idx_group][0] = _scalarFlux;
+                    }
                     break;
 
                 case MOMENTS:
@@ -1254,22 +1306,52 @@ void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
                     for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
                         _outputFields[idx_group][0][idx_cell] = 0.0;
                         _outputFields[idx_group][1][idx_cell] = 0.0;
-                        for( unsigned idx_moments = 0; idx_moments < _nOutputMoments; idx_moments++ ) {
-                            _outputFields[idx_group][0][idx_cell] = 0.0;
-                            _outputFields[idx_group][1][idx_cell] = 0.0;
-                            _outputFields[idx_group][2][idx_cell] = 0.0;
-                            // for( unsigned idx_sys = _startSysIdx; idx_sys < _endSysIdx; idx_sys++ ) {    // TODO
-                            //     _outputFields[idx_group][0][idx_cell] +=
-                            //         _quadPts[Idx2D( idx_sys, 0, _nDim )] * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
-                            //     _outputFields[idx_group][1][idx_cell] +=
-                            //         _quadPts[Idx2D( idx_sys, 1, _nDim )] * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
-                            // }
+                        for( unsigned idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                            _outputFields[idx_group][0][idx_cell] +=
+                                _quadPts[Idx2D( idx_sys, 0, _nDim )] * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
+                            _outputFields[idx_group][1][idx_cell] +=
+                                _quadPts[Idx2D( idx_sys, 1, _nDim )] * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
                         }
                     }
+#ifdef BUILD_MPI
+                    MPI_Barrier( MPI_COMM_WORLD );
+                    MPI_Allreduce(
+                        _outputFields[idx_group][0].data(), _outputFields[idx_group][0].data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+                    MPI_Allreduce(
+                        _outputFields[idx_group][1].data(), _outputFields[idx_group][1].data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+                    MPI_Barrier( MPI_COMM_WORLD );
+#endif
                     break;
-
                 default: ErrorMessages::Error( "Volume Output Group not defined for HPC SN Solver!", CURRENT_FUNCTION ); break;
             }
+        }
+    }
+}
+
+void SNSolverHPC::PrintVolumeOutput( int idx_iter ) {
+    if( _settings->GetSaveRestartSolutionFrequency() != 0 && idx_iter % (int)_settings->GetSaveRestartSolutionFrequency() == 0 ) {
+        // std::cout << "Saving restart solution at iteration " << idx_iter << std::endl;
+        WriteRestartSolution( _settings->GetOutputFile(),
+                              _sol,
+                              _scalarFlux,
+                              _rank,
+                              idx_iter,
+                              _totalAbsorptionHohlraumCenter,
+                              _totalAbsorptionHohlraumVertical,
+                              _totalAbsorptionHohlraumHorizontal,
+                              _totalAbsorptionLattice );
+    }
+
+    if( _settings->GetVolumeOutputFrequency() != 0 && idx_iter % (int)_settings->GetVolumeOutputFrequency() == 0 ) {
+        WriteVolumeOutput( idx_iter );
+        if( _rank == 0 ) {
+            ExportVTK( _settings->GetOutputFile() + "_" + std::to_string( idx_iter ), _outputFields, _outputFieldNames, _mesh );    // slow
+        }
+    }
+    if( idx_iter == (int)_nIter - 1 ) {    // Last iteration write without suffix.
+        WriteVolumeOutput( idx_iter );
+        if( _rank == 0 ) {
+            ExportVTK( _settings->GetOutputFile(), _outputFields, _outputFieldNames, _mesh );
         }
     }
 }
@@ -1368,54 +1450,145 @@ void SNSolverHPC::SetGhostCells() {
 
 void SNSolverHPC::SetProbingCellsLineGreen() {
 
-    if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
-        double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
-        double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
-
-        // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-
-        unsigned nHorizontalProbingCells =
-            (unsigned)std::ceil( _nProbingCellsLineGreen * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
-        unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
-
-        _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
-
-        // Sample points on each side of the rectangle
-        std::vector<unsigned> side3 = linspace2D( _cornerLowerRightGreen, _cornerUpperRightGreen, nVerticalProbingCells );
-        std::vector<unsigned> side4 = linspace2D( _cornerUpperRightGreen, _cornerUpperLeftGreen, nHorizontalProbingCells );
-
-        //  Combine the points from each side
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
-    }
-    else if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
-        double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
-        double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
-
-        // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-
-        unsigned nHorizontalProbingCells =
-            (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
-        unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
-
-        _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
+    // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
+    //     double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
+    //     double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
+    //
+    //     // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
+    //
+    //     unsigned nHorizontalProbingCells =
+    //         (unsigned)std::ceil( _nProbingCellsLineGreen * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
+    //     unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
+    //
+    //     _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
+    //
+    //     // Sample points on each side of the rectangle
+    //     std::vector<unsigned> side3 = linspace2D( _cornerLowerRightGreen, _cornerUpperRightGreen, nVerticalProbingCells );
+    //     std::vector<unsigned> side4 = linspace2D( _cornerUpperRightGreen, _cornerUpperLeftGreen, nHorizontalProbingCells );
+    //
+    //     //  Combine the points from each side
+    //     _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
+    //     _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
+    // }
+    // else
+    if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
 
         std::vector<double> p1 = { _cornerUpperLeftGreen[0] + _thicknessGreen / 2.0, _cornerUpperLeftGreen[1] - _thicknessGreen / 2.0 };
-        std::vector<double> p2 = { _cornerLowerLeftGreen[0] + _thicknessGreen / 2.0, _cornerLowerLeftGreen[1] + _thicknessGreen / 2.0 };
-        std::vector<double> p3 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
-        std::vector<double> p4 = { _cornerLowerRightGreen[0] - _thicknessGreen / 2.0, _cornerLowerRightGreen[1] + _thicknessGreen / 2.0 };
+        std::vector<double> p2 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
+        std::vector<double> p3 = { _cornerLowerRightGreen[0] - _thicknessGreen / 2.0, _cornerLowerRightGreen[1] + _thicknessGreen / 2.0 };
+        std::vector<double> p4 = { _cornerLowerLeftGreen[0] + _thicknessGreen / 2.0, _cornerLowerLeftGreen[1] + _thicknessGreen / 2.0 };
+
+        double verticalLineWidth   = std::abs( p1[1] - p4[1] );
+        double horizontalLineWidth = std::abs( p1[0] - p2[0] );
+
+        double pt_ratio_h = horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth );
+        double pt_ratio_v = verticalLineWidth / ( horizontalLineWidth + verticalLineWidth );
+
+        unsigned nHorizontalProbingCells = (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * pt_ratio_h );
+        unsigned nVerticalProbingCells   = _nProbingCellsLineGreen / 2 - nHorizontalProbingCells;
+
+        _probingCellsLineGreen = std::vector<unsigned>( 2 * ( nVerticalProbingCells + nHorizontalProbingCells ) );
 
         // Sample points on each side of the rectangle
-        std::vector<unsigned> side1 = linspace2D( p1, p2, nVerticalProbingCells );
-        std::vector<unsigned> side2 = linspace2D( p2, p3, nHorizontalProbingCells );
-        std::vector<unsigned> side3 = linspace2D( p3, p4, nVerticalProbingCells );
-        std::vector<unsigned> side4 = linspace2D( p4, p1, nHorizontalProbingCells );
+        std::vector<unsigned> side1 = linspace2D( p1, p2, nHorizontalProbingCells );    // upper horizontal
+        std::vector<unsigned> side2 = linspace2D( p2, p3, nVerticalProbingCells );      // right vertical
+        std::vector<unsigned> side3 = linspace2D( p3, p4, nHorizontalProbingCells );    // lower horizontal
+        std::vector<unsigned> side4 = linspace2D( p4, p1, nVerticalProbingCells );      // left vertical
 
-        //  Combine the points from each side
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side1.begin(), side1.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side2.begin(), side2.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
-        _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
+        for( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
+            _probingCellsLineGreen[i] = side1[i];
+        }
+        for( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+            _probingCellsLineGreen[i + nHorizontalProbingCells] = side2[i];
+        }
+        for( unsigned i = 0; i < nHorizontalProbingCells; ++i ) {
+            _probingCellsLineGreen[i + nVerticalProbingCells + nHorizontalProbingCells] = side3[i];
+        }
+        for( unsigned i = 0; i < nVerticalProbingCells; ++i ) {
+            _probingCellsLineGreen[i + nVerticalProbingCells + 2 * nHorizontalProbingCells] = side4[i];
+        }
+
+        // Block-wise approach
+        // Initialize the vector to store the corner points of each block
+        std::vector<std::vector<std::vector<double>>> block_corners;
+
+        double block_size = 0.05;
+
+        // Loop to fill the blocks
+        for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (upper) (left to right)
+
+            // Top row
+            double x1 = -0.2 + i * block_size;
+            double y1 = 0.4;
+            double x2 = x1 + block_size;
+            double y2 = y1 - block_size;
+
+            std::vector<std::vector<double>> corners = {
+                { x1, y1 },    // top-left
+                { x2, y1 },    // top-right
+                { x2, y2 },    // bottom-right
+                { x1, y2 }     // bottom-left
+            };
+            block_corners.push_back( corners );
+        }
+
+        for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical)
+            // right column double x1 = 0.15;
+            double x1 = 0.15;
+            double y1 = 0.35 - j * block_size;
+            double x2 = x1 + block_size;
+            double y2 = y1 - block_size;
+
+            // Store the four corner points for this block
+            std::vector<std::vector<double>> corners = {
+                { x1, y1 },    // top-left
+                { x2, y1 },    // top-right
+                { x2, y2 },    // bottom-right
+                { x1, y2 }     // bottom-left
+            };
+
+            block_corners.push_back( corners );
+        }
+
+        for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (lower) (right to left)
+            // bottom row
+            double x1 = 0.15 - i * block_size;
+            double y1 = -0.35;
+            double x2 = x1 + block_size;
+            double y2 = y1 - block_size;
+
+            std::vector<std::vector<double>> corners = {
+                { x1, y1 },    // top-left
+                { x2, y1 },    // top-right
+                { x2, y2 },    // bottom-right
+                { x1, y2 }     // bottom-left
+            };
+            block_corners.push_back( corners );
+        }
+
+        for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical) (down to up)
+
+            // left column
+            double x1 = -0.2;
+            double y1 = -0.3 + j * block_size;
+            double x2 = x1 + block_size;
+            double y2 = y1 - block_size;
+
+            // Store the four corner points for this block
+            std::vector<std::vector<double>> corners = {
+                { x1, y1 },    // top-left
+                { x2, y1 },    // top-right
+                { x2, y2 },    // bottom-right
+                { x1, y2 }     // bottom-left
+            };
+
+            block_corners.push_back( corners );
+        }
+
+        // Compute the probing cells for each block
+        for( int i = 0; i < _nProbingCellsBlocksGreen; i++ ) {
+            _probingCellsBlocksGreen.push_back( _mesh->GetCellsofRectangle( block_corners[i] ) );
+        }
     }
 }
 
@@ -1425,17 +1598,25 @@ void SNSolverHPC::ComputeQOIsGreenProbingLine() {
 
     double dl    = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
     double area  = dl * _thicknessGreen;
-    double a_g   = 0;
     double l_max = _nProbingCellsLineGreen * dl;
 
+#pragma omp parallel for
     for( unsigned i = 0; i < _nProbingCellsLineGreen; i++ ) {    // Loop over probing cells
-        _absorptionValsIntegrated[i] =
-            ( _sigmaT[_probingCellsLineGreen[i]] - _sigmaS[_probingCellsLineGreen[i]] ) * _scalarFlux[_probingCellsLineGreen[i]] * area;
-        a_g += _absorptionValsIntegrated[i] / (double)_nProbingCellsLineGreen;
+        _absorptionValsLineSegment[i] =
+            ( _sigmaT[_probingCellsLineGreen[i]] - _sigmaS[_probingCellsLineGreen[i]] ) * _scalarFlux[_probingCellsLineGreen[i]];
     }
-    for( unsigned i = 0; i < _nProbingCellsLineGreen; i++ ) {    // Loop over probing cells
-        _varAbsorptionValsIntegrated[i] = dl / l_max * ( a_g - _absorptionValsIntegrated[i] ) * ( a_g - _absorptionValsIntegrated[i] );
+
+    // Block-wise approach
+    // #pragma omp parallel for
+    for( unsigned i = 0; i < _nProbingCellsBlocksGreen; i++ ) {
+        _absorptionValsBlocksGreen[i] = 0.0;
+        for( unsigned j = 0; j < _probingCellsBlocksGreen[i].size(); j++ ) {
+            _absorptionValsBlocksGreen[i] += ( _sigmaT[_probingCellsBlocksGreen[i][j]] - _sigmaS[_probingCellsBlocksGreen[i][j]] ) *
+                                             _scalarFlux[_probingCellsBlocksGreen[i][j]] * _areas[_probingCellsBlocksGreen[i][j]];
+        }
     }
+    // std::cout << _absorptionValsBlocksGreen[1] << std::endl;
+    // std::cout << _absorptionValsLineSegment[1] << std::endl;
 }
 
 std::vector<unsigned> SNSolverHPC::linspace2D( const std::vector<double>& start, const std::vector<double>& end, unsigned num_points ) {
@@ -1453,7 +1634,7 @@ std::vector<unsigned> SNSolverHPC::linspace2D( const std::vector<double>& start,
     result.resize( num_points );
     double stepX = ( end[0] - start[0] ) / ( num_points - 1 );
     double stepY = ( end[1] - start[1] ) / ( num_points - 1 );
-
+#pragma omp parallel for
     for( unsigned i = 0; i < num_points; ++i ) {
         double x = start[0] + i * stepX;
         double y = start[1] + i * stepY;
