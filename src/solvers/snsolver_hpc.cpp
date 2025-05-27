@@ -1570,7 +1570,7 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
             // left column
             double x1 = -0.2;
-            double y1 = -0.35 + j * block_size;
+            double y1 = -0.3 + j * block_size;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
