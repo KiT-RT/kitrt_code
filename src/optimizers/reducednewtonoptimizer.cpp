@@ -9,6 +9,7 @@
 #include "entropies/entropybase.hpp"
 #include "quadratures/quadraturebase.hpp"
 #include "toolboxes/errormessages.hpp"
+#include "toolboxes/textprocessingtoolbox.hpp"
 
 ReducedNewtonOptimizer::ReducedNewtonOptimizer( Config* settings ) : NewtonOptimizer( settings ) {}
 
