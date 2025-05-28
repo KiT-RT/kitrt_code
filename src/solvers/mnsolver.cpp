@@ -13,7 +13,6 @@
 
 // externals
 #include "spdlog/spdlog.h"
-#include <mpi.h>
 
 MNSolver::MNSolver( Config* settings ) : SolverBase( settings ) {
 
@@ -130,12 +129,7 @@ void MNSolver::IterPreprocessing( unsigned /*idx_pseudotime*/ ) {
     }
 }
 
-void MNSolver::IterPostprocessing( unsigned /*idx_iter*/ ) {
-    // --- Compute Flux for solution and Screen Output ---
-    ComputeRadFlux();
-}
-
-void MNSolver::ComputeRadFlux() {
+void MNSolver::ComputeScalarFlux() {
     double firstMomentScaleFactor = 4 * M_PI;
     if( _settings->GetProblemName() == PROBLEM_Aircavity1D || _settings->GetProblemName() == PROBLEM_Linesource1D ||
         _settings->GetProblemName() == PROBLEM_Checkerboard1D ) {
@@ -146,7 +140,7 @@ void MNSolver::ComputeRadFlux() {
     }
 #pragma omp parallel for
     for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-        _fluxNew[idx_cell] = _sol[idx_cell][0] * firstMomentScaleFactor;
+        _scalarFluxNew[idx_cell] = _sol[idx_cell][0] * firstMomentScaleFactor;
     }
 }
 
@@ -257,20 +251,39 @@ void MNSolver::FluxUpdatePseudo2D() {
 }
 
 void MNSolver::FVMUpdate( unsigned idx_iter ) {
+    if( _Q.size() == 1u && _sigmaT.size() == 1u && _sigmaS.size() == 1u ) {    // Physics constant in time
 // Loop over the grid cells
 #pragma omp parallel for
-    for( unsigned idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
-        // Dirichlet Boundaries stay
-        if( _boundaryCells[idx_cell] == BOUNDARY_TYPE::DIRICHLET ) continue;
-        // Flux update
-        for( unsigned idx_sys = 0; idx_sys < _nSystem; idx_sys++ ) {
-            _solNew[idx_cell][idx_sys] = _sol[idx_cell][idx_sys]                                                            /* old solution */
-                                         - ( _dE / _areas[idx_cell] ) * _solNew[idx_cell][idx_sys]                          /* cell averaged flux */
-                                         + _dE * _sigmaS[idx_iter][idx_cell] * _sol[idx_cell][0] * _scatterMatDiag[idx_sys] /* scattering gain */
-                                         - _dE * ( _sigmaT[idx_iter][idx_cell] ) * _sol[idx_cell][idx_sys]; /* scattering and absorbtion loss */
+        for( unsigned idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
+            // Dirichlet Boundaries stay
+            if( _boundaryCells[idx_cell] == BOUNDARY_TYPE::DIRICHLET ) continue;
+            // Flux update
+            for( unsigned idx_sys = 0; idx_sys < _nSystem; idx_sys++ ) {
+                _solNew[idx_cell][idx_sys] = _sol[idx_cell][idx_sys]                                                     /* old solution */
+                                             - ( _dT / _areas[idx_cell] ) * _solNew[idx_cell][idx_sys]                   /* cell averaged flux */
+                                             + _dT * _sigmaS[0][idx_cell] * _sol[idx_cell][0] * _scatterMatDiag[idx_sys] /* scattering gain */
+                                             - _dT * ( _sigmaT[0][idx_cell] ) * _sol[idx_cell][idx_sys]; /* scattering and absorbtion loss */
+            }
+            // Source Term
+            _solNew[idx_cell] += _dT * _Q[0][idx_cell];
         }
-        // Source Term
-        _solNew[idx_cell] += _dE * _Q[0][idx_cell];
+    }
+    else {
+        // Loop over the grid cells
+#pragma omp parallel for
+        for( unsigned idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
+            // Dirichlet Boundaries stay
+            if( _boundaryCells[idx_cell] == BOUNDARY_TYPE::DIRICHLET ) continue;
+            // Flux update
+            for( unsigned idx_sys = 0; idx_sys < _nSystem; idx_sys++ ) {
+                _solNew[idx_cell][idx_sys] = _sol[idx_cell][idx_sys]                                   /* old solution */
+                                             - ( _dT / _areas[idx_cell] ) * _solNew[idx_cell][idx_sys] /* cell averaged flux */
+                                             + _dT * _sigmaS[idx_iter][idx_cell] * _sol[idx_cell][0] * _scatterMatDiag[idx_sys] /* scattering gain */
+                                             - _dT * ( _sigmaT[idx_iter][idx_cell] ) * _sol[idx_cell][idx_sys]; /* scattering and absorbtion loss */
+            }
+            // Source Term
+            _solNew[idx_cell] += _dT * _Q[idx_iter][idx_cell];
+        }
     }
 }
 
@@ -279,6 +292,7 @@ void MNSolver::PrepareVolumeOutput() {
     _outputFieldNames.resize( nGroups );
     _outputFields.resize( nGroups );
     // Prepare all OutputGroups ==> Specified in option VOLUME_OUTPUT
+#pragma omp parallel for
     for( unsigned idx_group = 0; idx_group < nGroups; idx_group++ ) {
         // Prepare all Output Fields per group
         // Different procedure, depending on the Group...
@@ -308,7 +322,7 @@ void MNSolver::PrepareVolumeOutput() {
                         unsigned count = 0;
                         for( int idx_l = 0; idx_l <= (int)_polyDegreeBasis; idx_l++ ) {
                             for( int idx_k = -idx_l; idx_k <= idx_l; idx_k++ ) {
-                                if( idx_l == 0 || idx_l != idx_k ) {
+                                if( ( idx_l + idx_k ) % 2 == 0 ) {
                                     _outputFields[idx_group][count].resize( _nCells );
                                     _outputFieldNames[idx_group][count] =
                                         std::string( "u_" + std::to_string( idx_l ) + "^" + std::to_string( idx_k ) );
@@ -353,7 +367,7 @@ void MNSolver::PrepareVolumeOutput() {
                         unsigned count = 0;
                         for( int idx_l = 0; idx_l <= (int)_polyDegreeBasis; idx_l++ ) {
                             for( int idx_k = -idx_l; idx_k <= idx_l; idx_k++ ) {
-                                if( idx_l == 0 || idx_l != idx_k ) {
+                                if( ( idx_l + idx_k ) % 2 == 0 ) {
                                     _outputFields[idx_group][count].resize( _nCells );
                                     _outputFieldNames[idx_group][count] =
                                         std::string( "alpha_" + std::to_string( idx_l ) + "^" + std::to_string( idx_k ) );
@@ -397,11 +411,12 @@ void MNSolver::WriteVolumeOutput( unsigned idx_iter ) {
     // Check if volume output fields are written to file this iteration
     if( ( _settings->GetVolumeOutputFrequency() != 0 && idx_iter % (unsigned)_settings->GetVolumeOutputFrequency() == 0 ) ||
         ( idx_iter == _nEnergies - 1 ) /* need sol at last iteration */ ) {
+#pragma omp parallel for
         for( unsigned idx_group = 0; idx_group < nGroups; idx_group++ ) {
             switch( _settings->GetVolumeOutput()[idx_group] ) {
                 case MINIMAL:
                     for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-                        _outputFields[idx_group][0][idx_cell] = _fluxNew[idx_cell];
+                        _outputFields[idx_group][0][idx_cell] = _scalarFluxNew[idx_cell];
                     }
                     break;
                 case MOMENTS:
@@ -421,7 +436,7 @@ void MNSolver::WriteVolumeOutput( unsigned idx_iter ) {
                 case ANALYTIC:
                     // Compute total "mass" of the system ==> to check conservation properties
                     for( unsigned idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-                        double time                           = idx_iter * _dE;
+                        double time                           = idx_iter * _dT;
                         _outputFields[idx_group][0][idx_cell] = _problem->GetAnalyticalSolution(
                             _mesh->GetCellMidPoints()[idx_cell][0], _mesh->GetCellMidPoints()[idx_cell][1], time, _sigmaS[idx_iter][idx_cell] );
                     }

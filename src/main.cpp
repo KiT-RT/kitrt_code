@@ -4,34 +4,43 @@
  *  @version: 0.1
  */
 
-#include <Python.h>
-#define PY_ARRAY_UNIQUE_SYMBOL KITRT_ARRAY_API
+#ifdef IMPORT_MPI
 #include <mpi.h>
+#endif
+#include <omp.h>
 #include <string>
 
 #include "common/config.hpp"
 #include "common/io.hpp"
+#include "datagenerator/datageneratorbase.hpp"
+#include "solvers/snsolver_hpc.hpp"
 #include "solvers/solverbase.hpp"
 
-#include "datagenerator/datageneratorbase.hpp"
-
 #ifdef BUILD_GUI
-#include <QApplication>
-
 #include "mainwindow.h"
+#include <QApplication>
 #endif
 
 int main( int argc, char** argv ) {
 #ifdef BUILD_GUI
-    MPI_Init( &argc, &argv );
     QApplication app( argc, argv );
     MainWindow mw;
     mw.show();
     return app.exec();
 #else
+// wchar_t* program = Py_DecodeLocale( argv[0], NULL );
+// Py_SetProgramName( program );
+#ifdef IMPORT_MPI
     MPI_Init( &argc, &argv );
-    wchar_t* program = Py_DecodeLocale( argv[0], NULL );
-    Py_SetProgramName( program );
+    int rank;
+    MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+    if ( rank == 0 ) {
+        printf( "| KiT-RT compiled with MPI and OpenMP parallelization\n" );
+    }
+#endif
+#ifndef IMPORT_MPI
+    printf( "| KiT-RT compiled with OpenMP, but without MPI parallelization\n" );
+#endif
 
     std::string filename = ParseArguments( argc, argv );
 
@@ -49,17 +58,25 @@ int main( int argc, char** argv ) {
     }
     else {
         // Build solver
-        SolverBase* solver = SolverBase::Create( config );
-
-        // Run solver and export
-        solver->Solve();
-        solver->PrintVolumeOutput();
-        delete solver;
+        if( config->GetHPC() ) {
+            SNSolverHPC* solver = new SNSolverHPC( config );
+            // Run solver and export
+            solver->Solve();
+            delete solver;
+        }
+        else {
+            SolverBase* solver = SolverBase::Create( config );
+            // Run solver and export
+            solver->Solve();
+            solver->PrintVolumeOutput();
+            delete solver;
+        }
     }
 
     delete config;
-
+#ifdef IMPORT_MPI
     MPI_Finalize();
+#endif
 
     return EXIT_SUCCESS;
 #endif
