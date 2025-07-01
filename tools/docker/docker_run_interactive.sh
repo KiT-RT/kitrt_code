@@ -1,1 +1,1 @@
-docker run -i -t --rm -v $(pwd)/../..:/mnt kitrt/test:latest /bin/bash  
+docker run -ti --rm -v $(pwd)/../..:/mnt kit-rt:ML_tf /bin/bash
