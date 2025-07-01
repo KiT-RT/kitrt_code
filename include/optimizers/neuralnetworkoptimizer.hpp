@@ -1,6 +1,7 @@
 #ifndef MLOPTIMIZER_H
 #define MLOPTIMIZER_H
 
+#include <memory>
 #include "optimizerbase.hpp"
 
 #ifdef BUILD_ML
@@ -31,7 +32,7 @@ class NeuralNetworkOptimizer : public OptimizerBase
     Vector _weights;                                               /*!<  @brief quadrature weights, dim(_weights) = (_nq) */
 
     std::string _tfModelInputName;               /*!< @brief Name of the tf model input */
-    cppflow::model* _tfModel;                    /*!< @brief wrapper object for the compiled tensorflow model*/
+    std::unique_ptr<cppflow::model> _tfModel;    /*!< @brief wrapper object for the compiled tensorflow model*/
     cppflow::tensor _modelInput;                 /*!< @brief model input tensor. dims: _nCellsx_nSys*/
     std::vector<float> _modelServingVectorU;     /*!< @brief model input as a 1D vector. dims: _nCells*(_nSys-1) */
     std::vector<float> _modelServingVectorAlpha; /*!< @brief model output as a 1D vector. dims: _nCells*_nSys */

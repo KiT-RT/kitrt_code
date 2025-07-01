@@ -67,7 +67,7 @@ NeuralNetworkOptimizer::NeuralNetworkOptimizer( Config* settings ) : OptimizerBa
     log->info( "| Load Tensorflow model from:\n| " + tfModelPath + "\n Tensorflow internal outputs activated below:\n" );
 
     // Load model
-    _tfModel             = new cppflow::model( tfModelPath );    // load model
+    _tfModel             = std::make_unique<cppflow::model>( tfModelPath );    // load model
     unsigned servingSize = _settings->GetNCells();
     if( _settings->GetEnforceNeuralRotationalSymmetry() ) {
         if( _settings->GetMaxMomentDegree() > 3 ) {
