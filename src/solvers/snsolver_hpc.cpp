@@ -286,7 +286,7 @@ void SNSolverHPC::Solve() {
         PrepareVolumeOutput();
         DrawPreSolverOutput();
     }
-
+    _curSimTime = 0.0;
     auto start = std::chrono::high_resolution_clock::now();    // Start timing
 
     std::chrono::duration<double> duration;
@@ -317,6 +317,7 @@ void SNSolverHPC::Solve() {
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
             FVMUpdate();
         }
+        _curSimTime += _dT;
         IterPostprocessing();
         // --- Wall time measurement
         duration  = std::chrono::high_resolution_clock::now() - start;
@@ -885,6 +886,7 @@ void SNSolverHPC::PrepareScreenOutput() {
         switch( _settings->GetScreenOutput()[idx_field] ) {
             case MASS: _screenOutputFieldNames[idx_field] = "Mass"; break;
             case ITER: _screenOutputFieldNames[idx_field] = "Iter"; break;
+            case SIM_TIME: _screenOutputFieldNames[idx_field] = "Sim time"; break;
             case WALL_TIME: _screenOutputFieldNames[idx_field] = "Wall time [s]"; break;
             case RMS_FLUX: _screenOutputFieldNames[idx_field] = "RMS flux"; break;
             case VTK_OUTPUT: _screenOutputFieldNames[idx_field] = "VTK out"; break;
@@ -932,6 +934,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
         switch( _settings->GetScreenOutput()[idx_field] ) {
             case MASS: _screenOutputFields[idx_field] = _mass; break;
             case ITER: _screenOutputFields[idx_field] = idx_iter; break;
+            case SIM_TIME: _screenOutputFields[idx_field] = _curSimTime; break;
             case WALL_TIME: _screenOutputFields[idx_field] = _currTime; break;
             case RMS_FLUX: _screenOutputFields[idx_field] = _rmsFlux; break;
             case VTK_OUTPUT:
@@ -986,6 +989,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
         switch( _settings->GetHistoryOutput()[idx_field] ) {
             case MASS: _historyOutputFields[idx_field] = _mass; break;
             case ITER: _historyOutputFields[idx_field] = idx_iter; break;
+            case SIM_TIME: _screenOutputFields[idx_field] = _curSimTime; break;
             case WALL_TIME: _historyOutputFields[idx_field] = _currTime; break;
             case RMS_FLUX: _historyOutputFields[idx_field] = _rmsFlux; break;
             case VTK_OUTPUT:
@@ -1131,6 +1135,7 @@ void SNSolverHPC::PrepareHistoryOutput() {
         switch( _settings->GetHistoryOutput()[idx_field] ) {
             case MASS: _historyOutputFieldNames[idx_field] = "Mass"; break;
             case ITER: _historyOutputFieldNames[idx_field] = "Iter"; break;
+            case SIM_TIME: _historyOutputFieldNames[idx_field] = "Sim_time"; break;
             case WALL_TIME: _historyOutputFieldNames[idx_field] = "Wall_time_[s]"; break;
             case RMS_FLUX: _historyOutputFieldNames[idx_field] = "RMS_flux"; break;
             case VTK_OUTPUT: _historyOutputFieldNames[idx_field] = "VTK_out"; break;

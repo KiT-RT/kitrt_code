@@ -178,6 +178,7 @@ inline std::map<std::string, VOLUME_OUTPUT> VolOutput_Map{
 enum SCALAR_OUTPUT {
     WALL_TIME,
     ITER,
+    SIM_TIME,
     MASS,
     RMS_FLUX,
     VTK_OUTPUT,
@@ -202,7 +203,8 @@ enum SCALAR_OUTPUT {
 };
 
 inline std::map<std::string, SCALAR_OUTPUT> ScalarOutput_Map{ { "ITER", ITER },
-                                                              { "WALL_TIME", WALL_TIME },
+                                                              { "WALL_TIME", WALL_TIME }, 
+                                                              { "SIM_TIME", SIM_TIME },
                                                               { "MASS", MASS },
                                                               { "RMS_FLUX", RMS_FLUX },
                                                               { "VTK_OUTPUT", VTK_OUTPUT },

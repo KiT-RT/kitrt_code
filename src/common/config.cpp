@@ -760,6 +760,7 @@ void Config::SetPostprocessing() {
                 case PROBLEM_Lattice:
                     legalOutputs = { ITER,
                                      WALL_TIME,
+                                     SIM_TIME,
                                      MASS,
                                      RMS_FLUX,
                                      VTK_OUTPUT,
@@ -780,7 +781,7 @@ void Config::SetPostprocessing() {
                         ErrorMessages::Error(
                             "Illegal output field <" + foundKey +
                                 "> for option SCREEN_OUTPUT for this test case.\n"
-                                "Supported fields are: ITER, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, FINAL_TIME_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW, "
+                                "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, FINAL_TIME_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW, "
                                 "FINAL_TIME_PARTICLE_ABSORPTION, TOTAL_PARTICLE_ABSORPTION, MAX_PARTICLE_ABSORPTION\n"
                                 "Please check your .cfg file.",
                             CURRENT_FUNCTION );
@@ -790,6 +791,7 @@ void Config::SetPostprocessing() {
                 case PROBLEM_SymmetricHohlraum:
                     legalOutputs = {
                         ITER,
+                        SIM_TIME,
                         WALL_TIME,
                         MASS,
                         RMS_FLUX,
@@ -813,7 +815,7 @@ void Config::SetPostprocessing() {
                         ErrorMessages::Error(
                             "Illegal output field <" + foundKey +
                                 "> for option SCREEN_OUTPUT for this test case.\n"
-                                "Supported fields are: ITER, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, TOTAL_PARTICLE_ABSORPTION_CENTER, \n"
+                                "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, TOTAL_PARTICLE_ABSORPTION_CENTER, \n"
                                 "TOTAL_PARTICLE_ABSORPTION_VERTICAL, TOTAL_PARTICLE_ABSORPTION_HORIZONTAL, PROBE_MOMENT_TIME_TRACE, CUR_OUTFLOW, \n "
                                 "TOTAL_OUTFLOW, MAX_OUTFLOW, VAR_ABSORPTION_GREEN \n"
                                 "Please check your .cfg file.",
@@ -822,7 +824,7 @@ void Config::SetPostprocessing() {
                     break;
 
                 default:
-                    legalOutputs = { ITER, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW };
+                    legalOutputs = { ITER, SIM_TIME, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW };
                     it           = std::find( legalOutputs.begin(), legalOutputs.end(), _screenOutput[idx_screenOutput] );
 
                     if( it == legalOutputs.end() ) {
@@ -830,7 +832,7 @@ void Config::SetPostprocessing() {
                         ErrorMessages::Error(
                             "Illegal output field <" + foundKey +
                                 "> for option SCREEN_OUTPUT for this test case.\n"
-                                "Supported fields are: ITER, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW \n"
+                                "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW \n"
                                 "Please check your .cfg file.",
                             CURRENT_FUNCTION );
                     }
@@ -909,6 +911,7 @@ void Config::SetPostprocessing() {
                 case PROBLEM_Lattice:
                     legalOutputs = { ITER,
                                      WALL_TIME,
+                                     SIM_TIME,
                                      MASS,
                                      RMS_FLUX,
                                      VTK_OUTPUT,
@@ -929,7 +932,7 @@ void Config::SetPostprocessing() {
                         ErrorMessages::Error(
                             "Illegal output field <" + foundKey +
                                 "> for option HISTORY_OUTPUT for this test case.\n"
-                                "Supported fields are: ITER, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, FINAL_TIME_OUTFLOW,\n"
+                                "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, FINAL_TIME_OUTFLOW,\n"
                                 "TOTAL_OUTFLOW, MAX_OUTFLOW, FINAL_TIME_PARTICLE_ABSORPTION, TOTAL_PARTICLE_ABSORPTION, MAX_PARTICLE_ABSORPTION\n"
                                 "Please check your .cfg file.",
                             CURRENT_FUNCTION );
@@ -939,6 +942,7 @@ void Config::SetPostprocessing() {
                 case PROBLEM_SymmetricHohlraum:
                     legalOutputs = { ITER,
                                      WALL_TIME,
+                                     SIM_TIME,
                                      MASS,
                                      RMS_FLUX,
                                      VTK_OUTPUT,
@@ -962,7 +966,7 @@ void Config::SetPostprocessing() {
                         ErrorMessages::Error(
                             "Illegal output field <" + foundKey +
                                 "> for option HISTORY_OUTPUT for this test case.\n"
-                                "Supported fields are: ITER, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, TOTAL_PARTICLE_ABSORPTION_CENTER, \n "
+                                "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, TOTAL_PARTICLE_ABSORPTION_CENTER, \n "
                                 "TOTAL_PARTICLE_ABSORPTION_VERTICAL, TOTAL_PARTICLE_ABSORPTION_HORIZONTAL,PROBE_MOMENT_TIME_TRACE,  CUR_OUTFLOW, \n"
                                 "TOTAL_OUTFLOW, MAX_OUTFLOW , VAR_ABSORPTION_GREEN, ABSORPTION_GREEN_BLOCK, ABSORPTION_GREEN_LINE \n"
                                 "Please check your .cfg file.",
@@ -971,7 +975,7 @@ void Config::SetPostprocessing() {
                     break;
 
                 default:
-                    legalOutputs = { ITER, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW };
+                    legalOutputs = { ITER, WALL_TIME, SIM_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW };
                     it           = std::find( legalOutputs.begin(), legalOutputs.end(), _historyOutput[idx_historyOutput] );
 
                     if( it == legalOutputs.end() ) {
@@ -979,7 +983,7 @@ void Config::SetPostprocessing() {
                         ErrorMessages::Error(
                             "Illegal output field <" + foundKey +
                                 "> for option SCREEN_OUTPUT for this test case.\n"
-                                "Supported fields are: ITER, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW \n"
+                                "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, CUR_OUTFLOW, TOTAL_OUTFLOW, MAX_OUTFLOW \n"
                                 "Please check your .cfg file.",
                             CURRENT_FUNCTION );
                     }
