@@ -989,7 +989,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
         switch( _settings->GetHistoryOutput()[idx_field] ) {
             case MASS: _historyOutputFields[idx_field] = _mass; break;
             case ITER: _historyOutputFields[idx_field] = idx_iter; break;
-            case SIM_TIME: _screenOutputFields[idx_field] = _curSimTime; break;
+            case SIM_TIME: _historyOutputFields[idx_field] = _curSimTime; break;
             case WALL_TIME: _historyOutputFields[idx_field] = _currTime; break;
             case RMS_FLUX: _historyOutputFields[idx_field] = _rmsFlux; break;
             case VTK_OUTPUT:
