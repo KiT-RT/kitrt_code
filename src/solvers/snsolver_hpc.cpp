@@ -536,8 +536,9 @@ void SNSolverHPC::FVMUpdate() {
     _mass    = 0.0;
     _rmsFlux = 0.0;
     std::vector<double> temp_scalarFlux( _nCells );    // for MPI allreduce
+    std::vector<double> prev_scalarFlux( _scalarFlux );
 
-#pragma omp parallel for reduction( + : _mass, _rmsFlux )
+#pragma omp parallel for reduction( + : _mass )
     for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 
 #pragma omp simd
@@ -556,7 +557,6 @@ void SNSolverHPC::FVMUpdate() {
             localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
         }
         _mass += localScalarFlux * _areas[idx_cell];
-        _rmsFlux += ( localScalarFlux - _scalarFlux[idx_cell] ) * ( localScalarFlux - _scalarFlux[idx_cell] );
         temp_scalarFlux[idx_cell] = localScalarFlux;    // set flux
     }
 // MPI Allreduce: _scalarFlux
@@ -564,9 +564,20 @@ void SNSolverHPC::FVMUpdate() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( temp_scalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     MPI_Barrier( MPI_COMM_WORLD );
+    if( _rank == 0 ) {
+        for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+            double diff = _scalarFlux[idx_cell] - prev_scalarFlux[idx_cell];
+            _rmsFlux += diff * diff;
+        }
+    }
 #endif
 #ifndef IMPORT_MPI
     _scalarFlux = temp_scalarFlux;
+#pragma omp parallel for reduction( + : _rmsFlux )
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+        double diff = _scalarFlux[idx_cell] - prev_scalarFlux[idx_cell];
+        _rmsFlux += diff * diff;
+    }
 #endif
 }
 
