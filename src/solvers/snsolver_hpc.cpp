@@ -714,6 +714,7 @@ void SNSolverHPC::IterPostprocessing() {
     double tmp_curScalarOutflow      = 0.0;
     double tmp_curScalarOutflowPeri1 = 0.0;
     double tmp_curScalarOutflowPeri2 = 0.0;
+    double tmp_curMaxOrdinateOutflow = 0.0;
     double tmp_mass                  = 0.0;
     double tmp_rmsFlux               = 0.0;
     MPI_Barrier( MPI_COMM_WORLD );
@@ -725,6 +726,9 @@ void SNSolverHPC::IterPostprocessing() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_curScalarOutflowPeri2, &tmp_curScalarOutflowPeri2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     _curScalarOutflowPeri2 = tmp_curScalarOutflowPeri2;
+    MPI_Barrier( MPI_COMM_WORLD );
+    MPI_Allreduce( &_curMaxOrdinateOutflow, &tmp_curMaxOrdinateOutflow, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD );
+    _curMaxOrdinateOutflow = tmp_curMaxOrdinateOutflow;
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_mass, &tmp_mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     _mass = tmp_mass;
