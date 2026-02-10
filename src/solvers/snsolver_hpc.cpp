@@ -1535,13 +1535,15 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         std::vector<std::vector<std::vector<double>>> block_corners;
 
         double block_size = 0.05;
+        const double cx   = _centerGreen[0];
+        const double cy   = _centerGreen[1];
 
         // Loop to fill the blocks
         for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (upper) (left to right)
 
             // Top row
-            double x1 = -0.2 + i * block_size;
-            double y1 = 0.4;
+            double x1 = -0.2 + cx + i * block_size;
+            double y1 = 0.4 + cy;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1556,8 +1558,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
         for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical)
             // right column double x1 = 0.15;
-            double x1 = 0.15;
-            double y1 = 0.35 - j * block_size;
+            double x1 = 0.15 + cx;
+            double y1 = 0.35 + cy - j * block_size;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1574,8 +1576,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
         for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (lower) (right to left)
             // bottom row
-            double x1 = 0.15 - i * block_size;
-            double y1 = -0.35;
+            double x1 = 0.15 + cx - i * block_size;
+            double y1 = -0.35 + cy;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1591,8 +1593,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical) (down to up)
 
             // left column
-            double x1 = -0.2;
-            double y1 = -0.3 + j * block_size;
+            double x1 = -0.2 + cx;
+            double y1 = -0.3 + cy + j * block_size;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
