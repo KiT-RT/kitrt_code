@@ -1491,6 +1491,7 @@ void SNSolverHPC::SetGhostCells() {
 void SNSolverHPC::SetProbingCellsLineGreen() {
 
     if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
+        assert( _nProbingCellsLineGreen % 2 == 0 );
 
         std::vector<double> p1 = { _cornerUpperLeftGreen[0] + _thicknessGreen / 2.0, _cornerUpperLeftGreen[1] - _thicknessGreen / 2.0 };
         std::vector<double> p2 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
@@ -1505,6 +1506,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
         unsigned nHorizontalProbingCells = (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * pt_ratio_h );
         unsigned nVerticalProbingCells   = _nProbingCellsLineGreen / 2 - nHorizontalProbingCells;
+        assert( nHorizontalProbingCells > 1 );
+        assert( nVerticalProbingCells > 1 );
 
         _probingCellsLineGreen = std::vector<unsigned>( 2 * ( nVerticalProbingCells + nHorizontalProbingCells ) );
 
