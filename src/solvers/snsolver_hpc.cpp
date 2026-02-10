@@ -9,6 +9,7 @@
 #include "quadratures/quadraturebase.hpp"
 #include "solvers/snsolver_hpc.hpp"
 #include "toolboxes/textprocessingtoolbox.hpp"
+#include <cassert>
 
 SNSolverHPC::SNSolverHPC( Config* settings ) {
 #ifdef IMPORT_MPI
@@ -1470,27 +1471,6 @@ void SNSolverHPC::SetGhostCells() {
 
 void SNSolverHPC::SetProbingCellsLineGreen() {
 
-    // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
-    //     double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
-    //     double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
-    //
-    //     // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-    //
-    //     unsigned nHorizontalProbingCells =
-    //         (unsigned)std::ceil( _nProbingCellsLineGreen * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
-    //     unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
-    //
-    //     _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
-    //
-    //     // Sample points on each side of the rectangle
-    //     std::vector<unsigned> side3 = linspace2D( _cornerLowerRightGreen, _cornerUpperRightGreen, nVerticalProbingCells );
-    //     std::vector<unsigned> side4 = linspace2D( _cornerUpperRightGreen, _cornerUpperLeftGreen, nHorizontalProbingCells );
-    //
-    //     //  Combine the points from each side
-    //     _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
-    //     _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
-    // }
-    // else
     if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
 
         std::vector<double> p1 = { _cornerUpperLeftGreen[0] + _thicknessGreen / 2.0, _cornerUpperLeftGreen[1] - _thicknessGreen / 2.0 };
@@ -1651,6 +1631,7 @@ std::vector<unsigned> SNSolverHPC::linspace2D( const std::vector<double>& start,
      */
 
     std::vector<unsigned> result;
+    assert( num_points > 1 );
     result.resize( num_points );
     double stepX = ( end[0] - start[0] ) / ( num_points - 1 );
     double stepY = ( end[1] - start[1] ) / ( num_points - 1 );
