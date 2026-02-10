@@ -96,7 +96,7 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
 
                 if( quadraturename == QUAD_GaussLegendre1D || quadraturename == QUAD_Midpoint1D || quadraturename == QUAD_Rectangular1D ) {
                     if( !approxequal( Q->SumUpWeights(), 2, lowAccuracyTesting ) ) {
@@ -137,16 +137,15 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Special case for Gauss Legendre with half weights
                 if( quadraturename == QUAD_GaussLegendreTensorized ) {
                     config->SetSNAllGaussPts( false );
-                    QuadratureBase* Q = QuadratureBase::Create( config );
-                    if( !approxequal( Q->SumUpWeights(), 4 * M_PI, lowAccuracyTesting ) ) {
+                    std::unique_ptr<QuadratureBase> QHalf( QuadratureBase::Create( config ) );
+                    if( !approxequal( QHalf->SumUpWeights(), 4 * M_PI, lowAccuracyTesting ) ) {
                         testPassed = false;
-                        PrintErrorMsg( config, std::abs( Q->SumUpWeights() - 4 * M_PI ), Q->SumUpWeights(), lowAccuracyTesting );
+                        PrintErrorMsg( config, std::abs( QHalf->SumUpWeights() - 4 * M_PI ), QHalf->SumUpWeights(), lowAccuracyTesting );
                         printf( "Reduced number of quadrature was points used. \n" );
                     }
 
                     config->SetSNAllGaussPts( true );
                 }
-                delete Q;
             }
         }
         REQUIRE( testPassed );
@@ -175,7 +174,7 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q   = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
                 VectorVector points = Q->GetPoints();
                 for( unsigned i = 0; i < Q->GetNq(); i++ ) {
                     if( !approxequal( 1.0, norm( points[i] ), lowAccuracyTesting ) ) {
@@ -188,10 +187,10 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Special case for Gauss Legendre with half weights
                 if( quadraturename == QUAD_GaussLegendreTensorized ) {
                     config->SetSNAllGaussPts( false );
-                    QuadratureBase* Q = QuadratureBase::Create( config );
+                    std::unique_ptr<QuadratureBase> QHalf( QuadratureBase::Create( config ) );
 
-                    VectorVector points = Q->GetPoints();
-                    for( unsigned i = 0; i < Q->GetNq(); i++ ) {
+                    VectorVector points = QHalf->GetPoints();
+                    for( unsigned i = 0; i < QHalf->GetNq(); i++ ) {
                         if( !approxequal( 1.0, norm( points[i] ), lowAccuracyTesting ) ) {
                             testPassed = false;
                             PrintErrorMsg( config, std::abs( norm( points[i] ) - 1.0 ), norm( points[i] ), lowAccuracyTesting );
@@ -202,7 +201,6 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
 
                     config->SetSNAllGaussPts( true );
                 }
-                delete Q;
             }
         }
         REQUIRE( testPassed );
@@ -225,7 +223,7 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q         = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
                 VectorVector points       = Q->GetPoints();          //(v_x,v_y,v_z)
                 VectorVector pointsSphere = Q->GetPointsSphere();    // (mu, phi, r)
 
@@ -256,7 +254,6 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                         printf( "Errorous index: %d\n", i );
                     }
                 }
-                delete Q;
             }
         }
         REQUIRE( testPassed );
@@ -403,7 +400,7 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 config->SetQuadName( quadraturename );
                 for( auto quadratureorder : quadratureorders[quadraturename] ) {
                     config->SetQuadOrder( quadratureorder );
-                    QuadratureBase* Q = QuadratureBase::Create( config );
+                    std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
                     points            = Q->GetPoints();
                     pointsSphere      = Q->GetPointsSphere();
                     for( unsigned idx_nq = 0; idx_nq < Q->GetNq(); idx_nq++ ) {
@@ -433,7 +430,6 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                             }
                         }
                     }
-                    delete Q;
                 }
             }
         }
@@ -464,7 +460,7 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
 
                 // Note: Leaving out Quad_GaussLegendreTensorized with half weights... (to be added)
                 if( quadraturename != QUAD_SphericalTessalation2D && quadraturename != QUAD_GaussLegendreTensorized2D &&
@@ -608,8 +604,6 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                         printf( "Error at integrating Polygon.\n" );
                     }
                 }
-
-                delete Q;
             }
         }
         REQUIRE( testPassed );

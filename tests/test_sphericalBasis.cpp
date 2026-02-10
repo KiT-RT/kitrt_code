@@ -6,6 +6,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 double Y0_0( double, double ) { return sqrt( 1 / ( 4 * M_PI ) ); }
@@ -33,7 +34,7 @@ TEST_CASE( "test  spherical harmonics basis ", "[spherical_harmonics]" ) {
     std::string filename = std::string( TESTS_PATH ) + "input/unit_tests/solvers/unit_harmonics.cfg";
 
     // Load Settings from File
-    Config* config = new Config( filename );
+    auto config = std::make_unique<Config>( filename );
 
     unsigned maxMomentDegree = 2;
 
@@ -127,7 +128,7 @@ TEST_CASE( "test  spherical harmonics basis ", "[spherical_harmonics]" ) {
     SECTION( "test orthonormality - spherical coordinates" ) {
         // Caution: Integration only works with spherical coordinates!
 
-        QGaussLegendreTensorized quad( config );
+        QGaussLegendreTensorized quad( config.get() );
 
         double my, phi, w;
         Vector moment = testBase.ComputeSphericalBasisKarthesian( 0, 1, 0 );
@@ -173,7 +174,7 @@ TEST_CASE( "test  spherical harmonics basis ", "[spherical_harmonics]" ) {
         Vector moment2 = testBase.ComputeSphericalBasis( 0, 0 );
 
         // Parity in carthesian coordinates
-        QGaussLegendreTensorized quad( config );
+        QGaussLegendreTensorized quad( config.get() );
 
         double x, y, z;
 
