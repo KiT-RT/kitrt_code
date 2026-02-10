@@ -312,6 +312,25 @@ void SNSolverHPC::Solve() {
                                 _sol[Idx2D( idx_cell, idx_sys, _localNSys )] );    // Solution averaging with HEUN
                 }
             }
+
+            // Keep scalar flux consistent with the final RK2-averaged solution used in postprocessing.
+            std::vector<double> temp_scalarFluxRK( _nCells, 0.0 );
+#pragma omp parallel for
+            for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+                double localScalarFlux = 0.0;
+#pragma omp simd reduction( + : localScalarFlux )
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                    localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
+                }
+                temp_scalarFluxRK[idx_cell] = localScalarFlux;
+            }
+#ifdef IMPORT_MPI
+            MPI_Barrier( MPI_COMM_WORLD );
+            MPI_Allreduce( temp_scalarFluxRK.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+            MPI_Barrier( MPI_COMM_WORLD );
+#else
+            _scalarFlux = temp_scalarFluxRK;
+#endif
         }
         else {
 
