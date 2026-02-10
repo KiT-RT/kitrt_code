@@ -977,7 +977,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
                 }
                 idx_field--;
                 break;
-            case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _absorptionValsBlocksGreen[0]; break;
+            case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _varAbsorptionHohlraumGreen; break;
             default: ErrorMessages::Error( "Screen output group not defined!", CURRENT_FUNCTION ); break;
         }
     }
