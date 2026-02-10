@@ -335,12 +335,12 @@ void SNSolverHPC::Solve() {
             PrintScreenOutput( iter );
             PrintHistoryOutput( iter );
         }
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
         MPI_Barrier( MPI_COMM_WORLD );
 #endif
 
         PrintVolumeOutput( iter );
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
         MPI_Barrier( MPI_COMM_WORLD );
 #endif
     }
@@ -1334,7 +1334,7 @@ void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
                                 _quadPts[Idx2D( idx_sys, 1, _nDim )] * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
                         }
                     }
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
                     MPI_Barrier( MPI_COMM_WORLD );
                     MPI_Allreduce(
                         _outputFields[idx_group][0].data(), _outputFields[idx_group][0].data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
