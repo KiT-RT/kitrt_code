@@ -287,7 +287,8 @@ void SNSolverHPC::Solve() {
         PrepareVolumeOutput();
         DrawPreSolverOutput();
     }
-    _curSimTime = 0.0;
+    // On restart, continue simulation time from the loaded iteration index.
+    _curSimTime = static_cast<double>( _idx_start_iter ) * _dT;
     auto start  = std::chrono::high_resolution_clock::now();    // Start timing
 
     std::chrono::duration<double> duration;
