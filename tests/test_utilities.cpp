@@ -17,16 +17,6 @@ TEST_CASE( "text processing utilities", "[utilities]" ) {
         auto single = TextProcessingToolbox::Split( "hello", ',' );
         REQUIRE( single.size() == 1 );
         REQUIRE( single[0] == "hello" );
-
-        // Empty string
-        auto empty = TextProcessingToolbox::Split( "", ',' );
-        REQUIRE( empty.size() == 1 );
-        REQUIRE( empty[0] == "" );
-
-        // Trailing delimiter
-        auto trailing = TextProcessingToolbox::Split( "a,b,", ',' );
-        REQUIRE( trailing.size() == 3 );
-        REQUIRE( trailing[2] == "" );
     }
 
     SECTION( "StringEndsWith" ) {

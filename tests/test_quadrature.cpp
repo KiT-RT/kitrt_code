@@ -3,6 +3,7 @@
 #include "common/globalconstants.hpp"
 #include "quadratures/quadraturebase.hpp"
 
+#include <memory>
 #include <vector>
 
 std::vector<QUAD_NAME> quadraturenames = { QUAD_MonteCarlo,
@@ -271,18 +272,17 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
                 REQUIRE( Q->GetNq() == size( Q->GetWeights() ) );
 
                 // Special case for Gauss Legendre with half weights
 
                 if( quadraturename == QUAD_GaussLegendreTensorized ) {
                     config->SetSNAllGaussPts( false );
-                    QuadratureBase* Q = QuadratureBase::Create( config );
-                    REQUIRE( Q->GetNq() == size( Q->GetWeights() ) );
+                    std::unique_ptr<QuadratureBase> QHalf( QuadratureBase::Create( config ) );
+                    REQUIRE( QHalf->GetNq() == size( QHalf->GetWeights() ) );
                     config->SetSNAllGaussPts( true );
                 }
-                delete Q;
             }
         }
     }
@@ -297,17 +297,16 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
                 REQUIRE( Q->GetNq() == size( Q->GetPoints() ) );
 
                 // Special case for Gauss Legendre with half weights
                 if( quadraturename == QUAD_GaussLegendreTensorized ) {
                     config->SetSNAllGaussPts( false );
-                    QuadratureBase* Q = QuadratureBase::Create( config );
-                    REQUIRE( Q->GetNq() == size( Q->GetPoints() ) );
+                    std::unique_ptr<QuadratureBase> QHalf( QuadratureBase::Create( config ) );
+                    REQUIRE( QHalf->GetNq() == size( QHalf->GetPoints() ) );
                     config->SetSNAllGaussPts( true );
                 }
-                delete Q;
             }
         }
     }
@@ -329,7 +328,7 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Set quadOrder
                 config->SetQuadOrder( quadratureorder );
 
-                QuadratureBase* Q = QuadratureBase::Create( config );
+                std::unique_ptr<QuadratureBase> Q( QuadratureBase::Create( config ) );
 
                 if( quadraturename == QUAD_Rectangular1D || quadraturename == QUAD_GaussLegendre1D || quadraturename == QUAD_Midpoint1D ) {
                     result = Q->Integrate( sin );
@@ -374,9 +373,9 @@ TEST_CASE( "Quadrature Tests", "[quadrature]" ) {
                 // Special case for Gauss Legendre with half weights
                 if( quadraturename == QUAD_GaussLegendreTensorized ) {
                     config->SetSNAllGaussPts( false );
-                    QuadratureBase* Q = QuadratureBase::Create( config );
+                    std::unique_ptr<QuadratureBase> QHalf( QuadratureBase::Create( config ) );
 
-                    result = Q->Integrate( f );
+                    result = QHalf->Integrate( f );
                     if( !approxequal( result, 4.0 * M_PI, lowAccuracyTesting ) ) {
                         testPassed = false;
                         PrintErrorMsg( config, std::abs( result - 4.0 * M_PI ), result, lowAccuracyTesting );

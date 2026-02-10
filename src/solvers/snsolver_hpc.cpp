@@ -287,7 +287,7 @@ void SNSolverHPC::Solve() {
         DrawPreSolverOutput();
     }
     _curSimTime = 0.0;
-    auto start = std::chrono::high_resolution_clock::now();    // Start timing
+    auto start  = std::chrono::high_resolution_clock::now();    // Start timing
 
     std::chrono::duration<double> duration;
     // Loop over energies (pseudo-time of continuous slowing down approach)

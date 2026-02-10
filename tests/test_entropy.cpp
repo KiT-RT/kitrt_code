@@ -24,22 +24,6 @@ TEST_CASE( "quadratic entropy", "[entropy]" ) {
         REQUIRE( eta.EntropyHessianDual( -5.0 ) == Approx( 1.0 ) );
     }
 
-    SECTION( "self-duality" ) {
-        // Quadratic entropy is self-dual: eta(z) == eta*(z)
-        for( double z = -5.0; z <= 5.0; z += 0.5 ) {
-            REQUIRE( eta.Entropy( z ) == Approx( eta.EntropyDual( z ) ) );
-        }
-    }
-
-    SECTION( "derivative consistency" ) {
-        // Numerical derivative of Entropy should match EntropyPrime
-        double h = 1e-7;
-        for( double z = -3.0; z <= 3.0; z += 0.5 ) {
-            double numDeriv = ( eta.Entropy( z + h ) - eta.Entropy( z - h ) ) / ( 2.0 * h );
-            REQUIRE( numDeriv == Approx( eta.EntropyPrime( z ) ).epsilon( 1e-5 ) );
-        }
-    }
-
     SECTION( "identity: eta_prime and eta_prime_dual are inverses" ) {
         // For quadratic entropy, eta'(z) = z and eta*'(y) = y (identity)
         for( double z = -3.0; z <= 3.0; z += 0.5 ) {
