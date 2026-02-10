@@ -287,7 +287,7 @@ void SNSolverHPC::Solve() {
         DrawPreSolverOutput();
     }
     _curSimTime = 0.0;
-    auto start = std::chrono::high_resolution_clock::now();    // Start timing
+    auto start  = std::chrono::high_resolution_clock::now();    // Start timing
 
     std::chrono::duration<double> duration;
     // Loop over energies (pseudo-time of continuous slowing down approach)
@@ -1670,23 +1670,22 @@ void SNSolverHPC::ComputeCellsPerimeterLattice() {
                     continue;    // Skip boundary - ghost cells
                 }
 
-                if( abs( ( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_1 && abs( cellMids[idx_cell][0] ) < l_1 ) ||
-                    abs( ( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_1 && abs( cellMids[idx_cell][1] ) < l_1 ) ) {
+                if( ( abs( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_1 && abs( cellMids[idx_cell][0] ) < l_1 ) ||
+                    ( abs( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_1 && abs( cellMids[idx_cell][1] ) < l_1 ) ) {
                     // neighbor is outside perimeter
                     _cellsLatticePerimeter1[idx_cell].push_back( idx_nbr );
                     _isPerimeterLatticeCell1[idx_cell] = true;
                 }
             }
         }
-        if( abs( cellMids[idx_cell][0] ) < l_2 && abs( cellMids[idx_cell][1] ) < l_2 && abs( cellMids[idx_cell][0] ) > l_1 &&
-            abs( cellMids[idx_cell][1] ) > l_1 ) {
+        else if( abs( cellMids[idx_cell][0] ) < l_2 && abs( cellMids[idx_cell][1] ) < l_2 ) {
             // Cell is within perimeter
             for( unsigned idx_nbr = 0; idx_nbr < _mesh->GetNumNodesPerCell(); ++idx_nbr ) {
                 if( neigbors[idx_cell][idx_nbr] == _mesh->GetNumCells() ) {
                     continue;    // Skip boundary - ghost cells
                 }
-                if( abs( ( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_2 && abs( cellMids[idx_cell][0] ) < l_2 ) ||
-                    abs( ( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_2 && abs( cellMids[idx_cell][1] ) < l_2 ) ) {
+                if( ( abs( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_2 && abs( cellMids[idx_cell][0] ) < l_2 ) ||
+                    ( abs( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_2 && abs( cellMids[idx_cell][1] ) < l_2 ) ) {
                     // neighbor is outside perimeter
                     _cellsLatticePerimeter2[idx_cell].push_back( idx_nbr );
                     _isPerimeterLatticeCell2[idx_cell] = true;
