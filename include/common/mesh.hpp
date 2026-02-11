@@ -133,7 +133,7 @@ class Mesh
      *  @return cell_idxs:   std::vector<unsigned> */
     std::vector<unsigned> GetCellsofBall( const double x, const double y, const double r ) const;
 
-    /*! @brief Returns index of cells contained in the rectangle with specified corner coordinates/*
+    /*! @brief Returns index of cells contained in the rectangle with specified corner coordinates
      *  @return cell_idxs:   std::vector<unsigned> */
     std::vector<unsigned> GetCellsofRectangle( const std::vector<std::vector<double>>& cornercoordinates ) const;
 

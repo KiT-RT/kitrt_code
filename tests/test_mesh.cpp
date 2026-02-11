@@ -7,13 +7,14 @@
 #include "common/mesh.hpp"
 #include <filesystem>
 #include <iostream>
+#include <memory>
 
 TEST_CASE( "unit mesh tests", "[mesh]" ) {
     std::string config_file_name = std::string( TESTS_PATH ) + "input/unit_tests/common/unit_mesh.cfg";
 
-    Config* config = new Config( config_file_name );
+    auto config = std::make_unique<Config>( config_file_name );
     config->SetForcedConnectivity( true );
-    Mesh* mesh = LoadSU2MeshFromFile( config );
+    auto mesh = std::unique_ptr<Mesh>( LoadSU2MeshFromFile( config.get() ) );
 
     SECTION( "sum of all cell areas is equal to total domain volume" ) {
         double domainArea   = 1.0;
@@ -112,7 +113,7 @@ TEST_CASE( "unit mesh tests", "[mesh]" ) {
         }
         else {
             config->SetForcedConnectivity( false );
-            Mesh* mesh2 = LoadSU2MeshFromFile( config );
+            Mesh* mesh2 = LoadSU2MeshFromFile( config.get() );
 
             // Check cell number
             REQUIRE( mesh2->GetNumCells() == mesh->GetNumCells() );
@@ -165,8 +166,8 @@ TEST_CASE( "reconstruction tests", "[mesh]" ) {
     SECTION( "ensure correct Gauss theorem" ) {
         std::string config_file_name = std::string( TESTS_PATH ) + "input/unit_tests/common/unit_mesh.cfg";
 
-        Config* config = new Config( config_file_name );
-        Mesh* mesh     = LoadSU2MeshFromFile( config );
+        auto config = std::make_unique<Config>( config_file_name );
+        auto mesh   = std::unique_ptr<Mesh>( LoadSU2MeshFromFile( config.get() ) );
 
         int numCells           = mesh->GetNumCells();
         int nq                 = 5;

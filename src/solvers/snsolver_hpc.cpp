@@ -39,7 +39,7 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     _nq   = static_cast<unsigned long>( quad->GetNq() );
     _nSys = _nq;
 
-    if( _numProcs > _nq ) {
+    if( static_cast<unsigned long>( _numProcs ) > _nq ) {
         ErrorMessages::Error( "The number of processors must be less than or equal to the number of quadrature points.", CURRENT_FUNCTION );
     }
 
@@ -1503,7 +1503,6 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         double horizontalLineWidth = std::abs( p1[0] - p2[0] );
 
         double pt_ratio_h = horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth );
-        double pt_ratio_v = verticalLineWidth / ( horizontalLineWidth + verticalLineWidth );
 
         unsigned nHorizontalProbingCells = (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * pt_ratio_h );
         unsigned nVerticalProbingCells   = _nProbingCellsLineGreen / 2 - nHorizontalProbingCells;
@@ -1611,20 +1610,13 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         }
 
         // Compute the probing cells for each block
-        for( int i = 0; i < _nProbingCellsBlocksGreen; i++ ) {
+        for( unsigned i = 0; i < _nProbingCellsBlocksGreen; i++ ) {
             _probingCellsBlocksGreen.push_back( _mesh->GetCellsofRectangle( block_corners[i] ) );
         }
     }
 }
 
 void SNSolverHPC::ComputeQOIsGreenProbingLine() {
-    double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] - _thicknessGreen );
-    double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] - _thicknessGreen );
-
-    double dl    = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-    double area  = dl * _thicknessGreen;
-    double l_max = _nProbingCellsLineGreen * dl;
-
 #pragma omp parallel for
     for( unsigned i = 0; i < _nProbingCellsLineGreen; i++ ) {    // Loop over probing cells
         _absorptionValsLineSegment[i] =

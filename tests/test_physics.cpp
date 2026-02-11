@@ -4,6 +4,7 @@
 #include "quadratures/qgausslegendre1D.hpp"
 #include "toolboxes/epics.hpp"
 #include "toolboxes/icru.hpp"
+#include <memory>
 
 TEST_CASE( "ENDL: checking angular integral of scattering cross sections to be unity", "[physics]" ) {
 
@@ -92,8 +93,8 @@ TEST_CASE( "Test ICRU database" ) {
     Vector mu( quadPoints.size() );
     for( unsigned i = 0; i < quadPoints.size(); ++i ) mu[i] = quadPoints[i][0];
     Vector e( 1, 1 );    // 1 MeV
-    Config* settings = new Config( std::string( TESTS_PATH ) + "input/unit_tests/problems/icru.cfg" );
-    ICRU db( mu, e, settings );
+    auto settings = std::make_unique<Config>( std::string( TESTS_PATH ) + "input/unit_tests/problems/icru.cfg" );
+    ICRU db( mu, e, settings.get() );
 
     SECTION( "angular xs" ) {
         double totalXS_ref = 3044.818373;
@@ -143,6 +144,4 @@ TEST_CASE( "Test ICRU database" ) {
         REQUIRE( errorWithinBounds );
     }
 
-    // TODO: causes segmentation fault for unknown reasons
-    // delete settings;
 }
