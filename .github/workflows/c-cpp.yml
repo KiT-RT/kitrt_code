@@ -34,8 +34,6 @@ jobs:
           cd build
           ./unit_tests 
 
-          ./unit_tests -r junit -o unit_tests_report.xml
-
       - name: Code coverage
         run: |
           cpp-coveralls -r . -b "build/" -i "src/" -i "include/" --exclude "ext/" --gcov-options "\-lp" --verbose
