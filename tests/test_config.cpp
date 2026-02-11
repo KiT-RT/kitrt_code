@@ -1,11 +1,12 @@
 #include "catch.hpp"
 #include "common/config.hpp"
+#include <memory>
 
 TEST_CASE( "Read in Config Template" ) {
     std::string filename = std::string( TESTS_PATH ) + "input/unit_tests/common/unit_config.cfg";
 
     // Load Settings from File
-    Config* config = new Config( filename );
+    auto config = std::make_unique<Config>( filename );
 
     // Test all set configurations
     bool allSatisfied = true;

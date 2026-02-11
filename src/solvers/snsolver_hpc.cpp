@@ -38,7 +38,7 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     _nq   = static_cast<unsigned long>( quad->GetNq() );
     _nSys = _nq;
 
-    if( _numProcs > _nq ) {
+    if( static_cast<unsigned long>( _numProcs ) > _nq ) {
         ErrorMessages::Error( "The number of processors must be less than or equal to the number of quadrature points.", CURRENT_FUNCTION );
     }
 
@@ -286,8 +286,8 @@ void SNSolverHPC::Solve() {
         PrepareVolumeOutput();
         DrawPreSolverOutput();
     }
-
-    auto start = std::chrono::high_resolution_clock::now();    // Start timing
+    _curSimTime = 0.0;
+    auto start  = std::chrono::high_resolution_clock::now();    // Start timing
 
     std::chrono::duration<double> duration;
     // Loop over energies (pseudo-time of continuous slowing down approach)
@@ -317,6 +317,7 @@ void SNSolverHPC::Solve() {
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
             FVMUpdate();
         }
+        _curSimTime += _dT;
         IterPostprocessing();
         // --- Wall time measurement
         duration  = std::chrono::high_resolution_clock::now() - start;
@@ -885,6 +886,7 @@ void SNSolverHPC::PrepareScreenOutput() {
         switch( _settings->GetScreenOutput()[idx_field] ) {
             case MASS: _screenOutputFieldNames[idx_field] = "Mass"; break;
             case ITER: _screenOutputFieldNames[idx_field] = "Iter"; break;
+            case SIM_TIME: _screenOutputFieldNames[idx_field] = "Sim time"; break;
             case WALL_TIME: _screenOutputFieldNames[idx_field] = "Wall time [s]"; break;
             case RMS_FLUX: _screenOutputFieldNames[idx_field] = "RMS flux"; break;
             case VTK_OUTPUT: _screenOutputFieldNames[idx_field] = "VTK out"; break;
@@ -932,6 +934,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
         switch( _settings->GetScreenOutput()[idx_field] ) {
             case MASS: _screenOutputFields[idx_field] = _mass; break;
             case ITER: _screenOutputFields[idx_field] = idx_iter; break;
+            case SIM_TIME: _screenOutputFields[idx_field] = _curSimTime; break;
             case WALL_TIME: _screenOutputFields[idx_field] = _currTime; break;
             case RMS_FLUX: _screenOutputFields[idx_field] = _rmsFlux; break;
             case VTK_OUTPUT:
@@ -986,6 +989,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
         switch( _settings->GetHistoryOutput()[idx_field] ) {
             case MASS: _historyOutputFields[idx_field] = _mass; break;
             case ITER: _historyOutputFields[idx_field] = idx_iter; break;
+            case SIM_TIME: _historyOutputFields[idx_field] = _curSimTime; break;
             case WALL_TIME: _historyOutputFields[idx_field] = _currTime; break;
             case RMS_FLUX: _historyOutputFields[idx_field] = _rmsFlux; break;
             case VTK_OUTPUT:
@@ -1131,6 +1135,7 @@ void SNSolverHPC::PrepareHistoryOutput() {
         switch( _settings->GetHistoryOutput()[idx_field] ) {
             case MASS: _historyOutputFieldNames[idx_field] = "Mass"; break;
             case ITER: _historyOutputFieldNames[idx_field] = "Iter"; break;
+            case SIM_TIME: _historyOutputFieldNames[idx_field] = "Sim_time"; break;
             case WALL_TIME: _historyOutputFieldNames[idx_field] = "Wall_time_[s]"; break;
             case RMS_FLUX: _historyOutputFieldNames[idx_field] = "RMS_flux"; break;
             case VTK_OUTPUT: _historyOutputFieldNames[idx_field] = "VTK_out"; break;
@@ -1482,7 +1487,6 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         double horizontalLineWidth = std::abs( p1[0] - p2[0] );
 
         double pt_ratio_h = horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth );
-        double pt_ratio_v = verticalLineWidth / ( horizontalLineWidth + verticalLineWidth );
 
         unsigned nHorizontalProbingCells = (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * pt_ratio_h );
         unsigned nVerticalProbingCells   = _nProbingCellsLineGreen / 2 - nHorizontalProbingCells;
@@ -1586,20 +1590,13 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         }
 
         // Compute the probing cells for each block
-        for( int i = 0; i < _nProbingCellsBlocksGreen; i++ ) {
+        for( unsigned i = 0; i < _nProbingCellsBlocksGreen; i++ ) {
             _probingCellsBlocksGreen.push_back( _mesh->GetCellsofRectangle( block_corners[i] ) );
         }
     }
 }
 
 void SNSolverHPC::ComputeQOIsGreenProbingLine() {
-    double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] - _thicknessGreen );
-    double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] - _thicknessGreen );
-
-    double dl    = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-    double area  = dl * _thicknessGreen;
-    double l_max = _nProbingCellsLineGreen * dl;
-
 #pragma omp parallel for
     for( unsigned i = 0; i < _nProbingCellsLineGreen; i++ ) {    // Loop over probing cells
         _absorptionValsLineSegment[i] =

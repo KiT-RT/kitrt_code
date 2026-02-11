@@ -24,6 +24,7 @@ class SNSolverHPC
     unsigned long _startSysIdx;
     unsigned long _endSysIdx;
 
+    double _curSimTime;/*!< @brief current in-simulation time after current iteration     */
     double _currTime;  /*!< @brief wall-time after current iteration */
     Config* _settings; /*!< @brief config class for global information */
     Mesh* _mesh;
@@ -157,7 +158,8 @@ class SNSolverHPC
 
     void IterPostprocessing();
 
-    void SetGhostCells(); /*!< @brief Sets vector of ghost cells for
+    /*! @brief Sets vector of ghost cell values according to boundary conditions */
+    void SetGhostCells();
 
     // Helper
     /*! @brief ComputeTimeStep calculates the maximal stable time step using the
