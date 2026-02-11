@@ -403,8 +403,7 @@ bool parseTokenAsDouble( const std::string& token, double& value ) {
             parsedChars++;
         }
         return parsedChars == token.size();
-    }
-    catch( ... ) {
+    } catch( ... ) {
         return false;
     }
 }
@@ -434,9 +433,9 @@ std::string findNewestCSVFile( const std::string& directory, const std::string& 
                 continue;
             }
             if( !localFound || entry.last_write_time() > localNewestWrite ) {
-                localFound      = true;
+                localFound       = true;
                 localNewestWrite = entry.last_write_time();
-                localNewestPath = entry.path();
+                localNewestPath  = entry.path();
             }
         }
         if( localFound ) {
@@ -461,7 +460,7 @@ void compareHistoryCSV( const std::string& referenceFile, const std::string& tes
     REQUIRE( testStream.is_open() );
 
     std::string lineRef, lineTest;
-    const char delim    = ',';
+    const char delim = ',';
 
     // Header row (skip token 0 because it contains runtime timestamp)
     REQUIRE( std::getline( referenceStream, lineRef ) );
@@ -546,6 +545,7 @@ TEST_CASE( "SN_SOLVER_HPC_CSV_QOI_VALIDATION", "[validation_tests][hpc]" ) {
         requireAndFlushTestLoggers();
 
         std::string outputCSV = findNewestCSVFile( logDir, "lattice_hpc_200_output" );
+
         REQUIRE( !outputCSV.empty() );
         compareHistoryCSV( referenceCSV, outputCSV );
 
