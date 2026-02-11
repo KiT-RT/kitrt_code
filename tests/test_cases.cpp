@@ -37,6 +37,15 @@ std::vector<double> readVTKFile( std::string filename ) {
     return data;
 }
 
+void requireAndFlushTestLoggers() {
+    auto log    = spdlog::get( "event" );
+    auto logCSV = spdlog::get( "tabular" );
+    REQUIRE( log );
+    REQUIRE( logCSV );
+    log->flush();
+    logCSV->flush();
+}
+
 TEST_CASE( "SN_SOLVER", "[validation_tests]" ) {
     std::string sn_fileDir = "input/validation_tests/SN_solver/";
     SECTION( "checkerboard" ) {
@@ -460,6 +469,7 @@ void compareHistoryCSV( const std::string& referenceFile, const std::string& tes
 
     REQUIRE( headerRef.size() == headerTest.size() );
     REQUIRE( headerRef.size() > 1 );
+    const unsigned expectedTokens = static_cast<unsigned>( headerRef.size() );
 
     std::vector<bool> skipColumn( headerRef.size(), false );
     for( unsigned idx_token = 1; idx_token < headerRef.size(); idx_token++ ) {
@@ -489,6 +499,7 @@ void compareHistoryCSV( const std::string& referenceFile, const std::string& tes
         INFO( "Line " << lineNumber );
         REQUIRE( tokensRef.size() == tokensTest.size() );
         REQUIRE( tokensRef.size() > 1 );
+        REQUIRE( tokensRef.size() == expectedTokens );
 
         for( unsigned idx_token = 1; idx_token < tokensRef.size(); idx_token++ ) {    // Skip date/time prefix in first column
             if( skipColumn[idx_token] ) {
@@ -527,10 +538,7 @@ TEST_CASE( "SN_SOLVER_HPC_CSV_QOI_VALIDATION", "[validation_tests][hpc]" ) {
         SNSolverHPC* solver = new SNSolverHPC( config );
         solver->Solve();
 
-        auto log    = spdlog::get( "event" );
-        auto logCSV = spdlog::get( "tabular" );
-        log->flush();
-        logCSV->flush();
+        requireAndFlushTestLoggers();
 
         std::string outputCSV = findNewestCSVFile( logDir, "lattice_hpc_200_output" );
         REQUIRE( !outputCSV.empty() );
@@ -551,10 +559,7 @@ TEST_CASE( "SN_SOLVER_HPC_CSV_QOI_VALIDATION", "[validation_tests][hpc]" ) {
         SNSolverHPC* solver = new SNSolverHPC( config );
         solver->Solve();
 
-        auto log    = spdlog::get( "event" );
-        auto logCSV = spdlog::get( "tabular" );
-        log->flush();
-        logCSV->flush();
+        requireAndFlushTestLoggers();
 
         std::string outputCSV = findNewestCSVFile( logDir, "symmetric_hohlraum_hpc_200_output" );
         REQUIRE( !outputCSV.empty() );
@@ -582,10 +587,7 @@ TEST_CASE( "screen_output", "[output]" ) {
     solver->Solve();
 
     // Force Logger to flush
-    auto log    = spdlog::get( "event" );
-    auto logCSV = spdlog::get( "tabular" );
-    log->flush();
-    logCSV->flush();
+    requireAndFlushTestLoggers();
     // --- Read and validate logger ---
     std::ifstream screenLoggerReferenceStream( screenLoggerReference );
     std::ifstream screenLoggerStream( screenLogger );
@@ -674,10 +676,7 @@ TEST_CASE( "Data Generator Regression", "[dataGen]" ) {
     datagen->ComputeTrainingData();
 
     // --- Force Logger to flush
-    auto log    = spdlog::get( "event" );
-    auto logCSV = spdlog::get( "tabular" );
-    log->flush();
-    logCSV->flush();
+    requireAndFlushTestLoggers();
 
     // --- Read and validate logger ---
     std::ifstream historyLoggerReferenceStream( historyLoggerReference );
@@ -738,10 +737,7 @@ TEST_CASE( "Data Generator Classification", "[dataGen]" ) {
     datagen->ComputeTrainingData();
 
     // --- Force Logger to flush
-    auto log    = spdlog::get( "event" );
-    auto logCSV = spdlog::get( "tabular" );
-    log->flush();
-    logCSV->flush();
+    requireAndFlushTestLoggers();
 
     // --- Read and validate logger ---
     std::ifstream historyLoggerReferenceStream( historyLoggerReference );
@@ -807,10 +803,7 @@ TEST_CASE( "Data Generator Regularized Regression", "[dataGen]" ) {
     datagen->ComputeTrainingData();
 
     // --- Force Logger to flush
-    auto log    = spdlog::get( "event" );
-    auto logCSV = spdlog::get( "tabular" );
-    log->flush();
-    logCSV->flush();
+    requireAndFlushTestLoggers();
 
     // --- Read and validate logger ---
     std::ifstream historyLoggerReferenceStream( historyLoggerReference );
