@@ -530,7 +530,7 @@ void Config::SetPostprocessing() {
     _dataDir           = std::filesystem::path( _inputDir ).append( _dataDir ).lexically_normal();
 
     // create directories if they dont exist
-    if( !std::filesystem::exists( _outputDir ) ) std::filesystem::create_directory( _outputDir );
+    if( !std::filesystem::exists( _outputDir ) ) std::filesystem::create_directories( _outputDir );
 
     // init logger
     InitLogger();
@@ -1249,7 +1249,7 @@ void Config::InitLogger() {
 
         // create log dir if not existent
         if( !std::filesystem::exists( _logDir ) ) {
-            std::filesystem::create_directory( _logDir );
+            std::filesystem::create_directories( _logDir );
         }
 
         if( !spdlog::get( "event" ) ) {

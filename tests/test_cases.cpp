@@ -46,6 +46,11 @@ void requireAndFlushTestLoggers() {
     logCSV->flush();
 }
 
+void resetTestLoggers() {
+    // Config::InitLogger uses spdlog::flush_every; shutdown avoids flusher-thread races between test cases.
+    spdlog::shutdown();
+}
+
 TEST_CASE( "SN_SOLVER", "[validation_tests]" ) {
     std::string sn_fileDir = "input/validation_tests/SN_solver/";
     SECTION( "checkerboard" ) {
@@ -525,7 +530,7 @@ void compareHistoryCSV( const std::string& referenceFile, const std::string& tes
 
 TEST_CASE( "SN_SOLVER_HPC_CSV_QOI_VALIDATION", "[validation_tests][hpc]" ) {
     std::string hpcFileDir = "input/validation_tests/SN_solver_hpc/";
-    spdlog::drop_all();    // Ensure deterministic logger files for this test case
+    resetTestLoggers();    // Ensure deterministic logger files for this test case
 
     SECTION( "lattice_200_cells_all_qois" ) {
         std::string configFileName = std::string( TESTS_PATH ) + hpcFileDir + "lattice_hpc_200.cfg";
@@ -572,7 +577,7 @@ TEST_CASE( "SN_SOLVER_HPC_CSV_QOI_VALIDATION", "[validation_tests][hpc]" ) {
 
 TEST_CASE( "screen_output", "[output]" ) {
     std::string out_fileDir = "input/validation_tests/output/";
-    spdlog::drop_all();    // Make sure to write in own logging file
+    resetTestLoggers();    // Make sure to write in own logging file
 
     std::string config_file_name       = std::string( TESTS_PATH ) + out_fileDir + "validate_logger.cfg";
     std::string screenLoggerReference  = std::string( TESTS_PATH ) + out_fileDir + "validate_logger_reference";
@@ -661,7 +666,7 @@ TEST_CASE( "screen_output", "[output]" ) {
 
 TEST_CASE( "Data Generator Regression", "[dataGen]" ) {
     std::string out_fileDir = "input/validation_tests/dataGenerator/";
-    spdlog::drop_all();    // Make sure to write in own logging file
+    resetTestLoggers();    // Make sure to write in own logging file
 
     std::string config_file_name       = std::string( TESTS_PATH ) + out_fileDir + "validate_dataGen_regression.cfg";
     std::string historyLoggerReference = std::string( TESTS_PATH ) + out_fileDir + "validate_dataGen_regression_csv_reference";
@@ -722,7 +727,7 @@ TEST_CASE( "Data Generator Regression", "[dataGen]" ) {
 
 TEST_CASE( "Data Generator Classification", "[dataGen]" ) {
     std::string out_fileDir = "input/validation_tests/dataGenerator/";
-    spdlog::drop_all();    // Make sure to write in own logging file
+    resetTestLoggers();    // Make sure to write in own logging file
 
     std::string config_file_name       = std::string( TESTS_PATH ) + out_fileDir + "validate_dataGen_classification.cfg";
     std::string historyLoggerReference = std::string( TESTS_PATH ) + out_fileDir + "validate_dataGen_csv_classification_reference";
@@ -788,7 +793,7 @@ TEST_CASE( "Data Generator Classification", "[dataGen]" ) {
 
 TEST_CASE( "Data Generator Regularized Regression", "[dataGen]" ) {
     std::string out_fileDir = "input/validation_tests/dataGenerator/";
-    spdlog::drop_all();    // Make sure to write in own logging file
+    resetTestLoggers();    // Make sure to write in own logging file
 
     std::string config_file_name       = std::string( TESTS_PATH ) + out_fileDir + "validate_dataGen_regularized_regression.cfg";
     std::string historyLoggerReference = std::string( TESTS_PATH ) + out_fileDir + "validate_dataGen_csv_regularized_reference";
