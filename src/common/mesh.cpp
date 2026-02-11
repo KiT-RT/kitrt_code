@@ -26,10 +26,8 @@ Mesh::Mesh( const Config* settings,
     else {
         ErrorMessages::Error( "Unsupported mesh dimension!", CURRENT_FUNCTION );
     }
-    int nprocs = 1;
     int rank   = 0;
 #ifdef IMPORT_MPI
-    MPI_Comm_size( MPI_COMM_WORLD, &nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 #endif
     if( rank == 0 ) {
@@ -93,18 +91,13 @@ Mesh::Mesh( const Config* settings,
 Mesh::~Mesh() {}
 
 void Mesh::ComputeConnectivity() {
-    int nprocs = 1;
     int rank   = 0;
 #ifdef IMPORT_MPI
-    MPI_Comm_size( MPI_COMM_WORLD, &nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 #endif
 
-    unsigned comm_size = 1;    // No MPI implementation right now
     // determine number/chunk size and indices of cells treated by each mpi thread (deactivated for now)
     unsigned chunkSize    = _numCells;    // std::ceil( static_cast<float>( _numCells ) / static_cast<float>( comm_size ) );
-    unsigned mpiCellStart = 0;            // comm_rank * chunkSize;
-    unsigned mpiCellEnd   = _numCells;    // std::min( ( comm_rank + 1 ) * chunkSize, _numCells );
 
     // 'flat' vectors are a flattened representation of the neighbors numCells<numNodesPerCell> nested vectors; easier for MPI
     // 'part' vectors store information for each single MPI thread

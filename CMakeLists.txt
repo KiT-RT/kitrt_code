@@ -45,7 +45,7 @@ include_directories( ${LAPACK_INCLUDE_DIR} )
 
 find_package( BLAS )
 
-find_package( VTK COMPONENTS vtkIOGeometry vtkFiltersCore REQUIRED )
+find_package( VTK COMPONENTS IOGeometry FiltersCore REQUIRED )
 
 add_compile_definitions( KITRT_PYTHON_PATH="${CMAKE_SOURCE_DIR}/python" )
 add_compile_definitions( BLAZE_USE_SHARED_MEMORY_PARALLELIZATION=0 )

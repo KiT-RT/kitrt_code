@@ -51,11 +51,9 @@ void ExportVTK( const std::string fileName,
                 const std::vector<std::vector<std::vector<double>>>& outputFields,
                 const std::vector<std::vector<std::string>>& outputFieldNames,
                 const Mesh* mesh ) {
-    int rank   = 0;
-    int nprocs = 1;
+    int rank = 0;
 #ifdef IMPORT_MPI
     // Initialize MPI
-    MPI_Comm_size( MPI_COMM_WORLD, &nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 #endif
     if( rank == 0 ) {
