@@ -85,8 +85,10 @@ DataGeneratorBase::DataGeneratorBase( Config* settings ) {
 }
 
 DataGeneratorBase::~DataGeneratorBase() {
-    delete _quadrature;
     delete _entropy;
+    delete _optimizer;
+    delete _basisGenerator;
+    delete _quadrature;
 }
 
 DataGeneratorBase* DataGeneratorBase::Create( Config* settings ) {

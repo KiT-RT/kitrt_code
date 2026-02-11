@@ -1,4 +1,5 @@
 #include <numeric>
+#include <memory>
 
 #include "catch.hpp"
 #include "common/config.hpp"
@@ -9,14 +10,13 @@ TEST_CASE( "test all scattering kernels", "[kernel]" ) {
     std::string filename = std::string( TESTS_PATH ) + "input/unit_tests/kernels/unit_kernel.cfg";
 
     // Load Settings from File
-    Config* config = new Config( filename );
-
-    QuadratureBase* quad = QuadratureBase::Create( config );    //@TODO: swap out for different quadrature rule
+    auto config = std::make_unique<Config>( filename );
+    auto quad   = std::unique_ptr<QuadratureBase>( QuadratureBase::Create( config.get() ) );    //@TODO: swap out for different quadrature rule
 
     SECTION( "isotropic scattering kernel" ) {
 
         auto weights = quad->GetWeights();
-        Isotropic kernel( quad );
+        Isotropic kernel( quad.get() );
         Matrix scatteringMatrix = kernel.GetScatteringKernel();
         bool errorWithinBounds  = true;
         for( unsigned i = 0; i < scatteringMatrix.rows(); ++i ) {

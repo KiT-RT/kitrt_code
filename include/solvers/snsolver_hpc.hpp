@@ -158,7 +158,8 @@ class SNSolverHPC
 
     void IterPostprocessing();
 
-    void SetGhostCells(); /*!< @brief Sets vector of ghost cells for
+    /*! @brief Sets vector of ghost cell values according to boundary conditions */
+    void SetGhostCells();
 
     // Helper
     /*! @brief ComputeTimeStep calculates the maximal stable time step using the
