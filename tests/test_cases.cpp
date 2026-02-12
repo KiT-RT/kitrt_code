@@ -13,6 +13,9 @@
 #include "common/config.hpp"
 #include "datagenerator/datageneratorbase.hpp"
 #include "solvers/snsolver_hpc.hpp"
+#ifdef KITRT_ENABLE_CUDA_HPC
+#include "solvers/snsolver_hpc_cuda.hpp"
+#endif
 #include "solvers/solverbase.hpp"
 
 using vtkUnstructuredGridReaderSP = vtkSmartPointer<vtkUnstructuredGridReader>;
@@ -518,6 +521,7 @@ void compareHistoryCSV( const std::string& referenceFile, const std::string& tes
             INFO( "Line " << lineNumber << ", token " << idx_token );
             if( refNumeric && tstNumeric ) {
                 double scale = std::max( 1.0, std::max( std::fabs( valueRef ), std::fabs( valueTest ) ) );
+                INFO( "Column " << headerRef[idx_token] << ", ref=" << valueRef << ", test=" << valueTest );
                 REQUIRE( std::fabs( valueRef - valueTest ) <= absTol + relTol * scale );
             }
             else {
@@ -574,6 +578,69 @@ TEST_CASE( "SN_SOLVER_HPC_CSV_QOI_VALIDATION", "[validation_tests][hpc]" ) {
         delete config;
     }
 }
+
+#ifdef KITRT_ENABLE_CUDA_HPC
+TEST_CASE( "SN_SOLVER_HPC_CUDA_QOI_VALIDATION", "[validation_tests][hpc][cuda]" ) {
+    std::string hpcFileDir = "input/validation_tests/SN_solver_hpc/";
+    std::string resultDir  = std::string( TESTS_PATH ) + "result";
+    std::string logDir     = std::string( TESTS_PATH ) + "result/logs";
+
+    auto runCpuAndCollectCSV = [&]( const std::string& configFileName, const std::string& prefix ) {
+        Config* config      = new Config( configFileName );
+        SNSolverHPC* solver = new SNSolverHPC( config );
+        solver->Solve();
+        requireAndFlushTestLoggers();
+        delete solver;
+        delete config;
+        return findNewestCSVFile( logDir, prefix );
+    };
+
+    auto runCudaAndCollectCSV = [&]( const std::string& configFileName, const std::string& prefix ) {
+        Config* config          = new Config( configFileName );
+        SNSolverHPCCUDA* solver = new SNSolverHPCCUDA( config );
+        solver->Solve();
+        requireAndFlushTestLoggers();
+        delete solver;
+        delete config;
+        return findNewestCSVFile( logDir, prefix );
+    };
+
+    SECTION( "lattice_order1_cpu_vs_cuda_all_qois" ) {
+        std::filesystem::remove_all( resultDir );
+        resetTestLoggers();
+        const std::string cpuConfig = std::string( TESTS_PATH ) + hpcFileDir + "lattice_hpc_200_cpu_order1.cfg";
+        const std::string cpuCSV    = runCpuAndCollectCSV( cpuConfig, "lattice_hpc_200_cpu_order1_output" );
+        REQUIRE( !cpuCSV.empty() );
+
+        resetTestLoggers();
+        const std::string cudaConfig = std::string( TESTS_PATH ) + hpcFileDir + "lattice_hpc_200_cuda_order1.cfg";
+        const std::string cudaCSV    = runCudaAndCollectCSV( cudaConfig, "lattice_hpc_200_cuda_order1_output" );
+        REQUIRE( !cudaCSV.empty() );
+
+        INFO( "CPU CSV: " << cpuCSV );
+        INFO( "CUDA CSV: " << cudaCSV );
+        compareHistoryCSV( cpuCSV, cudaCSV );
+    }
+
+    SECTION( "lattice_order2_cpu_vs_cuda_all_qois" ) {
+        std::filesystem::remove_all( resultDir );
+        resetTestLoggers();
+        const std::string cpuConfig = std::string( TESTS_PATH ) + hpcFileDir + "lattice_hpc_200_cpu_order2.cfg";
+        const std::string cpuCSV    = runCpuAndCollectCSV( cpuConfig, "lattice_hpc_200_cpu_order2_output" );
+        REQUIRE( !cpuCSV.empty() );
+
+        resetTestLoggers();
+        const std::string cudaConfig = std::string( TESTS_PATH ) + hpcFileDir + "lattice_hpc_200_cuda_order2.cfg";
+        const std::string cudaCSV    = runCudaAndCollectCSV( cudaConfig, "lattice_hpc_200_cuda_order2_output" );
+        REQUIRE( !cudaCSV.empty() );
+
+        INFO( "CPU CSV: " << cpuCSV );
+        INFO( "CUDA CSV: " << cudaCSV );
+        compareHistoryCSV( cpuCSV, cudaCSV );
+    }
+
+}
+#endif
 
 TEST_CASE( "screen_output", "[output]" ) {
     std::string out_fileDir = "input/validation_tests/output/";

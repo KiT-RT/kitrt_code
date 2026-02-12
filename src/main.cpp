@@ -14,6 +14,10 @@
 #include "common/io.hpp"
 #include "datagenerator/datageneratorbase.hpp"
 #include "solvers/snsolver_hpc.hpp"
+#ifdef KITRT_ENABLE_CUDA_HPC
+#include <cuda_runtime.h>
+#include "solvers/snsolver_hpc_cuda.hpp"
+#endif
 #include "solvers/solverbase.hpp"
 
 #ifdef BUILD_GUI
@@ -59,10 +63,23 @@ int main( int argc, char** argv ) {
     else {
         // Build solver
         if( config->GetHPC() ) {
+#ifdef KITRT_ENABLE_CUDA_HPC
+            int deviceCount = 0;
+            if( cudaGetDeviceCount( &deviceCount ) == cudaSuccess && deviceCount > 0 ) {
+                SNSolverHPCCUDA* solver = new SNSolverHPCCUDA( config );
+                solver->Solve();
+                delete solver;
+            }
+            else {
+                SNSolverHPC* solver = new SNSolverHPC( config );
+                solver->Solve();
+                delete solver;
+            }
+#else
             SNSolverHPC* solver = new SNSolverHPC( config );
-            // Run solver and export
             solver->Solve();
             delete solver;
+#endif
         }
         else {
             SolverBase* solver = SolverBase::Create( config );

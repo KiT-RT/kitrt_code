@@ -9,12 +9,24 @@ option( BUILD_UNITY "enables unity build for faster compile times" ON )
 option( BUILD_CODE_COV "enables compiler option required for code coverage analysis" OFF )
 option( BUILD_ML "enables build with tensorflow backend access" OFF )
 option( BUILD_MPI "enables build with MPI access" OFF )
+option( BUILD_CUDA_HPC "enables CUDA backend for SN HPC solver (single GPU)" OFF )
 #################################################
 
 
 ### COMPILER ####################################
 set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED ON )
+if( BUILD_CUDA_HPC )
+    enable_language( CUDA )
+    if( CMAKE_VERSION VERSION_LESS 3.18 )
+        # CMake 3.16 does not ship CUDA17 mappings by default.
+        set( CMAKE_CUDA17_STANDARD_COMPILE_OPTION "--std=c++17" )
+        set( CMAKE_CUDA17_EXTENSION_COMPILE_OPTION "--std=c++17" )
+    endif()
+    set( CMAKE_CUDA_STANDARD 17 )
+    set( CMAKE_CUDA_STANDARD_REQUIRED ON )
+    set( CMAKE_CUDA_EXTENSIONS OFF )
+endif()
 set( KITRT_RELEASE_OPTIONS -march=native -w )
 set( KITRT_RELWITHDEBINFO_OPTIONS -march=native -pg -no-pie )
 set( KITRT_DEBUG_OPTIONS -Wall -Wextra -Wpedantic )
@@ -29,6 +41,21 @@ endif()
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 find_package( OpenMP REQUIRED )
+
+if( BUILD_CUDA_HPC )
+    add_compile_definitions( KITRT_ENABLE_CUDA_HPC )
+    if( CMAKE_VERSION VERSION_GREATER_EQUAL 3.17 )
+        find_package( CUDAToolkit QUIET )
+    endif()
+    if( DEFINED CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES )
+        include_directories( ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES} )
+    elseif( EXISTS "/usr/local/cuda/include" )
+        include_directories( /usr/local/cuda/include )
+    endif()
+    message( STATUS "CUDA HPC solver: enabled" )
+else()
+    message( STATUS "CUDA HPC solver: disabled" )
+endif()
 
 message(STATUS "MPI build flag: ${BUILD_MPI}")
 if( BUILD_MPI )
@@ -72,6 +99,20 @@ else()
     set( CORE_LIBRARIES ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES}  ${VTK_LIBRARIES} OpenMP::OpenMP_CXX -lstdc++fs )
 endif()
 
+if( BUILD_CUDA_HPC )
+    if( TARGET CUDA::cudart )
+        list( APPEND CORE_LIBRARIES CUDA::cudart )
+    else()
+        find_library( CUDART_LIBRARY
+                      NAMES cudart
+                      HINTS ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES} /usr/local/cuda/lib64 /usr/lib/x86_64-linux-gnu )
+        if( NOT CUDART_LIBRARY )
+            message( FATAL_ERROR "Could not find CUDA runtime library (cudart)." )
+        endif()
+        list( APPEND CORE_LIBRARIES ${CUDART_LIBRARY} )
+    endif()
+endif()
+
 
 #################################################
 
@@ -89,6 +130,12 @@ add_compile_definitions( GIT_HASH="${GIT_HASH}" )
 
 ### BUILD KIT-RT ################################
 file( GLOB_RECURSE SRCS RELATIVE ${CMAKE_SOURCE_DIR} "src/*.cpp" "include/*.h" )
+if( BUILD_CUDA_HPC )
+    list( APPEND SRCS "src/solvers/snsolver_hpc.cu" "include/solvers/snsolver_hpc_cuda.hpp" )
+    # Force nvcc to parse this translation unit as C++17 even if transitive
+    # imported target features inject an older fallback standard.
+    set_source_files_properties( src/solvers/snsolver_hpc.cu PROPERTIES COMPILE_FLAGS "--std=c++17" )
+endif()
 set( EXCLUDE_DIR "/gui/" )
 foreach( TMP_PATH ${SRCS} )
     string( FIND ${TMP_PATH} ${EXCLUDE_DIR} EXCLUDE_DIR_FOUND )
@@ -110,9 +157,15 @@ if( BUILD_ML )
     target_link_libraries( ${CMAKE_PROJECT_NAME} ${CORE_LIBRARIES} ${TENSORFLOW_LIB})
 endif()
 target_link_libraries( ${CMAKE_PROJECT_NAME} ${CORE_LIBRARIES} )
-target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<CONFIG:DEBUG>:${KITRT_DEBUG_OPTIONS}>" )
-target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<CONFIG:RELWITHDEBINFO>:${KITRT_RELWITHDEBINFO_OPTIONS}>" )
-target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<CONFIG:RELEASE>:${KITRT_RELEASE_OPTIONS}>" )
+if( BUILD_CUDA_HPC )
+    set_target_properties(
+        ${CMAKE_PROJECT_NAME}
+        PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_EXTENSIONS OFF
+    )
+endif()
+target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:DEBUG>>:${KITRT_DEBUG_OPTIONS}>" )
+target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:RELWITHDEBINFO>>:${KITRT_RELWITHDEBINFO_OPTIONS}>" )
+target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:RELEASE>>:${KITRT_RELEASE_OPTIONS}>" )
 #################################################
 
 ### BUILD UNIT TESTS ############################
@@ -145,11 +198,17 @@ if( BUILD_TESTING )
     target_compile_definitions( unit_tests PUBLIC BUILD_TESTING )
     target_compile_definitions( unit_tests PUBLIC TESTS_PATH="${CMAKE_SOURCE_DIR}/tests/" )
     target_link_libraries( unit_tests Catch ${CORE_LIBRARIES} )
-    target_compile_options( unit_tests PUBLIC "$<$<CONFIG:DEBUG>:${KITRT_DEBUG_OPTIONS}>" )
+    if( BUILD_CUDA_HPC )
+        set_target_properties(
+            unit_tests
+            PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_EXTENSIONS OFF
+        )
+    endif()
+    target_compile_options( unit_tests PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:DEBUG>>:${KITRT_DEBUG_OPTIONS}>" )
     if( BUILD_CODE_COV )
         if( CMAKE_COMPILER_IS_GNUCXX )
             set( CODE_COVERAGE_OPTIONS --coverage -g -O0 -w )
-            target_compile_options( unit_tests PUBLIC "$<$<CONFIG:DEBUG>:${CODE_COVERAGE_OPTIONS}>" )
+            target_compile_options( unit_tests PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:DEBUG>>:${CODE_COVERAGE_OPTIONS}>" )
             target_link_libraries( unit_tests Catch gcov )
         else()
             message( FATAL_ERROR "Code coverage is currently only supported for gcc!" )
@@ -157,8 +216,8 @@ if( BUILD_TESTING )
     else()
         target_link_libraries( unit_tests Catch )
     endif()
-    target_compile_options( unit_tests PUBLIC "$<$<CONFIG:RELWITHDEBINFO>:${KITRT_RELWITHDEBINFO_OPTIONS}>" )
-    target_compile_options( unit_tests PUBLIC "$<$<CONFIG:RELEASE>:${KITRT_RELEASE_OPTIONS}>" )
+    target_compile_options( unit_tests PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:RELWITHDEBINFO>>:${KITRT_RELWITHDEBINFO_OPTIONS}>" )
+    target_compile_options( unit_tests PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:RELEASE>>:${KITRT_RELEASE_OPTIONS}>" )
     catch_discover_tests( unit_tests )
 endif()
 #################################################
@@ -179,9 +238,9 @@ if( BUILD_GUI )
     set( GUI_LIBRARIES Qt5::Core Qt5::Widgets Qt5::Gui Qt5::OpenGL ${VTK_LIBRARIES} )
     target_link_libraries( ${CMAKE_PROJECT_NAME}_gui ${CORE_LIBRARIES} ${GUI_LIBRARIES} )
     set_target_properties( ${CMAKE_PROJECT_NAME}_gui PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin" )
-    target_compile_options( ${CMAKE_PROJECT_NAME}_gui PUBLIC "$<$<CONFIG:DEBUG>:${KITRT_DEBUG_OPTIONS}>" )
-    target_compile_options( ${CMAKE_PROJECT_NAME}_gui PUBLIC "$<$<CONFIG:RELWITHDEBINFO>:${KITRT_RELWITHDEBINFO_OPTIONS}>" )
-    target_compile_options( ${CMAKE_PROJECT_NAME}_gui PUBLIC "$<$<CONFIG:RELEASE>:${KITRT_RELEASE_OPTIONS}>" )
+    target_compile_options( ${CMAKE_PROJECT_NAME}_gui PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:DEBUG>>:${KITRT_DEBUG_OPTIONS}>" )
+    target_compile_options( ${CMAKE_PROJECT_NAME}_gui PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:RELWITHDEBINFO>>:${KITRT_RELWITHDEBINFO_OPTIONS}>" )
+    target_compile_options( ${CMAKE_PROJECT_NAME}_gui PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:RELEASE>>:${KITRT_RELEASE_OPTIONS}>" )
 endif()
 #################################################
 
