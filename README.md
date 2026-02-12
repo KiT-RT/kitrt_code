@@ -16,7 +16,7 @@ KiT-RT is an open-source, multi-fidelity **C++ PDE solver for radiative transpor
 
 * **Modular, HPC-ready** architecture. Supports hybrid **MPI/OpenMP distributed parallelism**.
 * **Containerized** for portable deployment across HPC systems (Docker & Singularity).
-* **Python-wrapped** via [CharmKIT](https://github.com/KiT-RT/CharmKIT)
+* **Python-wrapped** via [charm_kit](https://github.com/KiT-RT/charm_kit)
 * Downstream applications:
   - Data generation for scientific **foundation models**.
   - high-resolution **reference solutions** for AI-based surrogate modeling.
@@ -203,7 +203,7 @@ gcovr -r .. --html-details coverage.html
 
 ## Python API
 
-The Python interface is provided via [CharmKIT](https://github.com/KiT-RT/CharmKIT), allowing seamless integration into AI and outer-loop (UQ, Optimization) workflows. 
+The Python interface is provided via [charm_kit](https://github.com/KiT-RT/charm_kit), allowing seamless integration into AI and outer-loop (UQ, Optimization) workflows. 
 Check the corresponding readme for further info
 
 
