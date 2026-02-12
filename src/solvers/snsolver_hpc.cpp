@@ -92,6 +92,7 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     _flux = std::vector<double>( _nCells * _localNSys );
 
     _scalarFlux              = std::vector<double>( _nCells );
+    _scalarFluxPrevIter      = std::vector<double>( _nCells );
     _localMaxOrdinateOutflow = std::vector<double>( _nCells );
 
     auto areas           = _mesh->GetCellAreas();
@@ -167,7 +168,6 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
 
             _scalarFlux[idx_cell] += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
         }
-        // _mass += _scalarFlux[idx_cell] * _areas[idx_cell];
     }
 
     // Lattice
@@ -298,6 +298,7 @@ void SNSolverHPC::Solve() {
         if( iter == _nIter - 1 ) {    // last iteration
             _dT = _settings->GetTEnd() - iter * _dT;
         }
+        _scalarFluxPrevIter = _scalarFlux;
         if( _temporalOrder == 2 ) {
             std::vector<double> solRK0( _sol );
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
@@ -554,12 +555,9 @@ void SNSolverHPC::FluxOrder1() {
 }
 
 void SNSolverHPC::FVMUpdate() {
-    _mass    = 0.0;
-    _rmsFlux = 0.0;
     std::vector<double> temp_scalarFlux( _nCells );    // for MPI allreduce
-    std::vector<double> prev_scalarFlux( _scalarFlux );
 
-#pragma omp parallel for reduction( + : _mass )
+#pragma omp parallel for
     for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 
 #pragma omp simd
@@ -577,7 +575,6 @@ void SNSolverHPC::FVMUpdate() {
             _sol[Idx2D( idx_cell, idx_sys, _localNSys )] = std::max( _sol[Idx2D( idx_cell, idx_sys, _localNSys )], 0.0 );
             localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
         }
-        _mass += localScalarFlux * _areas[idx_cell];
         temp_scalarFlux[idx_cell] = localScalarFlux;    // set flux
     }
 // MPI Allreduce: _scalarFlux
@@ -585,25 +582,22 @@ void SNSolverHPC::FVMUpdate() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( temp_scalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     MPI_Barrier( MPI_COMM_WORLD );
-    if( _rank == 0 ) {
-        for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-            double diff = _scalarFlux[idx_cell] - prev_scalarFlux[idx_cell];
-            _rmsFlux += diff * diff;
-        }
-    }
 #endif
 #ifndef IMPORT_MPI
     _scalarFlux = temp_scalarFlux;
-#pragma omp parallel for reduction( + : _rmsFlux )
-    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-        double diff = _scalarFlux[idx_cell] - prev_scalarFlux[idx_cell];
-        _rmsFlux += diff * diff;
-    }
 #endif
 }
 
 void SNSolverHPC::IterPostprocessing() {
     // ALREDUCE NEEDED
+    _mass    = 0.0;
+    _rmsFlux = 0.0;
+#pragma omp parallel for reduction( + : _mass, _rmsFlux )
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+        _mass += _scalarFlux[idx_cell] * _areas[idx_cell];
+        double diff = _scalarFlux[idx_cell] - _scalarFluxPrevIter[idx_cell];
+        _rmsFlux += diff * diff;
+    }
 
     _curAbsorptionLattice            = 0.0;
     _curScalarOutflow                = 0.0;
@@ -747,8 +741,6 @@ void SNSolverHPC::IterPostprocessing() {
     double tmp_curScalarOutflowPeri1 = 0.0;
     double tmp_curScalarOutflowPeri2 = 0.0;
     double tmp_curMaxOrdinateOutflow = 0.0;
-    double tmp_mass                  = 0.0;
-    double tmp_rmsFlux               = 0.0;
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_curScalarOutflow, &tmp_curScalarOutflow, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     _curScalarOutflow = tmp_curScalarOutflow;
@@ -761,12 +753,6 @@ void SNSolverHPC::IterPostprocessing() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_curMaxOrdinateOutflow, &tmp_curMaxOrdinateOutflow, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD );
     _curMaxOrdinateOutflow = tmp_curMaxOrdinateOutflow;
-    MPI_Barrier( MPI_COMM_WORLD );
-    MPI_Allreduce( &_mass, &tmp_mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
-    _mass = tmp_mass;
-    MPI_Barrier( MPI_COMM_WORLD );
-    MPI_Allreduce( &_rmsFlux, &tmp_rmsFlux, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
-    _rmsFlux = tmp_rmsFlux;
     MPI_Barrier( MPI_COMM_WORLD );
 #endif
     // Variation absorption (part II)

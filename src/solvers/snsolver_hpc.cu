@@ -418,6 +418,7 @@ SNSolverHPCCUDA::SNSolverHPCCUDA( Config* settings ) {
     _flux = std::vector<double>( _nCells * _localNSys );
 
     _scalarFlux              = std::vector<double>( _nCells );
+    _scalarFluxPrevIter      = std::vector<double>( _nCells );
     _localMaxOrdinateOutflow = std::vector<double>( _nCells );
 
     auto areas           = _mesh->GetCellAreas();
@@ -784,6 +785,7 @@ void SNSolverHPCCUDA::Solve() {
         if( iter == _nIter - 1 ) {    // last iteration
             _dT = _settings->GetTEnd() - iter * _dT;
         }
+        _scalarFluxPrevIter = _scalarFlux;
 
         if( _temporalOrder == 2 ) {
             CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
@@ -926,7 +928,6 @@ void SNSolverHPCCUDA::FVMUpdate() {
     const dim3 threads( CUDA_BLOCK_SIZE );
     const dim3 gridCells( static_cast<unsigned>( ( _nCells + CUDA_BLOCK_SIZE - 1 ) / CUDA_BLOCK_SIZE ) );
     const double invTwoPi = 1.0 / static_cast<double>( 2.0L * PI );
-    std::vector<double> prevScalarFlux( _scalarFlux );
 
     FVMUpdateKernel<<<gridCells, threads>>>( _nCells,
                                              _localNSys,
@@ -956,19 +957,18 @@ void SNSolverHPCCUDA::FVMUpdate() {
         cudaMemcpy( _device->scalarFlux, _scalarFlux.data(), static_cast<std::size_t>( _nCells ) * sizeof( double ), cudaMemcpyHostToDevice ),
         "sync allreduced scalar flux to device" );
 #endif
-
-    _mass    = 0.0;
-    _rmsFlux = 0.0;
-#pragma omp parallel for reduction( + : _mass, _rmsFlux )
-    for( unsigned long idxCell = 0; idxCell < _nCells; ++idxCell ) {
-        _mass += _scalarFlux[idxCell] * _areas[idxCell];
-        const double diff = _scalarFlux[idxCell] - prevScalarFlux[idxCell];
-        _rmsFlux += diff * diff;
-    }
 }
 
 void SNSolverHPCCUDA::IterPostprocessing() {
     // ALREDUCE NEEDED
+    _mass    = 0.0;
+    _rmsFlux = 0.0;
+#pragma omp parallel for reduction( + : _mass, _rmsFlux )
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+        _mass += _scalarFlux[idx_cell] * _areas[idx_cell];
+        double diff = _scalarFlux[idx_cell] - _scalarFluxPrevIter[idx_cell];
+        _rmsFlux += diff * diff;
+    }
 
     _curAbsorptionLattice            = 0.0;
     _curScalarOutflow                = 0.0;
@@ -1112,8 +1112,6 @@ void SNSolverHPCCUDA::IterPostprocessing() {
     double tmp_curScalarOutflowPeri1 = 0.0;
     double tmp_curScalarOutflowPeri2 = 0.0;
     double tmp_curMaxOrdinateOutflow = 0.0;
-    double tmp_mass                  = 0.0;
-    double tmp_rmsFlux               = 0.0;
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_curScalarOutflow, &tmp_curScalarOutflow, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     _curScalarOutflow = tmp_curScalarOutflow;
@@ -1126,12 +1124,6 @@ void SNSolverHPCCUDA::IterPostprocessing() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_curMaxOrdinateOutflow, &tmp_curMaxOrdinateOutflow, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD );
     _curMaxOrdinateOutflow = tmp_curMaxOrdinateOutflow;
-    MPI_Barrier( MPI_COMM_WORLD );
-    MPI_Allreduce( &_mass, &tmp_mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
-    _mass = tmp_mass;
-    MPI_Barrier( MPI_COMM_WORLD );
-    MPI_Allreduce( &_rmsFlux, &tmp_rmsFlux, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
-    _rmsFlux = tmp_rmsFlux;
     MPI_Barrier( MPI_COMM_WORLD );
 #endif
     // Variation absorption (part II)

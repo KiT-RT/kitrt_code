@@ -82,7 +82,8 @@ class SNSolverHPCCUDA
     std::vector<double> _flux; /*!< @brief dim = _nCells x _nSys */
 
     // Output related members
-    std::vector<double> _scalarFlux; /*!< @brief dim = _nCells  */
+    std::vector<double> _scalarFlux;         /*!< @brief dim = _nCells  */
+    std::vector<double> _scalarFluxPrevIter; /*!< @brief scalar flux snapshot before current solver iteration */
 
     // Lattice QOIS
     unsigned _nOutputMoments;
