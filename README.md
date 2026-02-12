@@ -66,73 +66,138 @@ Applications include:
 
 
 
-## Installation
+## Installation and Run (By Parallelization)
 
-### Plain cpp setup
+One-time setup:
 ```bash
-# Clone repository
 git clone https://github.com/KiT-RT/kitrt_code.git
 cd kitrt_code
 git submodule update --init --recursive
+```
 
-# Build with CMake
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ../
+Then run all commands from the repository root.
+
+### 1. CPU (OpenMP only)
+
+#### 1a) Plain installation (no container)
+```bash
+mkdir -p build_omp
+cd build_omp
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
 make -j
-
-```
-### Docker setup 
-A preconfigured docker container can also be used to run the code.
-By running
-
-```bash
-docker run --rm -ti -v $(pwd):/home kitrt/test:latest
+cd ..
+./build_omp/KiT-RT tests/input/validation_tests/SN_solver/checkerboard_SN.cfg
 ```
 
-Bash scripts are provided in the folder tools/CI to get started with the docker environments. To start an interactive docker environment, execute
+#### 1b) Docker installation
 ```bash
-docker run -i -t --rm -v $(pwd)/../..:/mnt kitrt/test:latest /bin/bash
+docker run --rm -it -v $(pwd):/mnt -w /mnt kitrt/test:latest /bin/bash
+mkdir -p build_docker_omp
+cd build_docker_omp
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
+make -j
+cd ..
+./build_docker_omp/KiT-RT tests/input/validation_tests/SN_solver/checkerboard_SN.cfg
 ```
 
-### Singularity setup 
-Create the singularity container
+#### 1c) Singularity installation
 ```bash
-mkdir build_singularity
 cd tools/singularity
-sudo sh build_container.sh
-chmod +x install_kitrt_singularity.sh
-singularity exec kit_rt.sif ./install_kitrt_singularity.sh
-```
-Run the singularity container
-```bash
-singularity shell --bind $(pwd)/../..:/mnt kit_rt.sif
-```
-
-## Running simulations
-Within any of the above setups, navigate to the example folder and execute KiT-RT
-```bash
-cd examples
-../<build_folder_name>/KiT-RT configs/lattice_SN.cfg
+sudo singularity build kit_rt.sif kit_rt.def
+cd ../..
+mkdir -p build_singularity_omp
+cd build_singularity_omp
+singularity exec ../tools/singularity/kit_rt.sif \
+  cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
+singularity exec ../tools/singularity/kit_rt.sif make -j
+cd ..
+singularity exec tools/singularity/kit_rt.sif \
+  ./build_singularity_omp/KiT-RT tests/input/validation_tests/SN_solver/checkerboard_SN.cfg
 ```
 
-## Tensorflow backend
-If you choose to enable the integrated machine learning tools via the BUILD_ML option, you need to install the tensorflow C-API:
+### 2. CPU (OpenMP + MPI)
+
+#### 2a) Plain installation (no container)
+```bash
+mkdir -p build_mpi
+cd build_mpi
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
+make -j
+cd ..
+mpirun -np 4 ./build_mpi/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cpu_order2.cfg
+```
+
+#### 2b) Singularity installation
+```bash
+cd tools/singularity
+sudo singularity build kit_rt_MPI.sif kit_rt_MPI.def
+cd ../..
+mkdir -p build_singularity_mpi
+cd build_singularity_mpi
+singularity exec ../tools/singularity/kit_rt_MPI.sif \
+  cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
+singularity exec ../tools/singularity/kit_rt_MPI.sif make -j
+cd ..
+singularity exec tools/singularity/kit_rt_MPI.sif \
+  mpirun -np 4 ./build_singularity_mpi/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cpu_order2.cfg
+```
+
+### 3. CPU + single GPU (OpenMP + CUDA)
+
+#### 3a) Singularity installation
+```bash
+cd tools/singularity
+sudo singularity build kit_rt_MPI_cuda.sif kit_rt_MPI_cuda.def
+cd ../..
+mkdir -p build_singularity_cuda
+cd build_singularity_cuda
+singularity exec --nv ../tools/singularity/kit_rt_MPI_cuda.sif \
+  cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=ON -DBUILD_ML=OFF ..
+singularity exec --nv ../tools/singularity/kit_rt_MPI_cuda.sif make -j
+cd ..
+singularity exec --nv tools/singularity/kit_rt_MPI_cuda.sif \
+  ./build_singularity_cuda/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cuda_order2.cfg
+```
+
+When compiled with `-DBUILD_CUDA_HPC=ON`, HPC runs use the CUDA backend if a GPU is visible, and fall back to CPU if no GPU is detected.
+
+### 4. Build with TensorFlow backend (CPU + OpenMP only)
+
 ```bash
 FILENAME=libtensorflow-cpu-linux-x86_64-2.7.0.tar.gz
 wget -q --no-check-certificate https://storage.googleapis.com/tensorflow/libtensorflow/${FILENAME}
-tar -C /usr/local -xzf ${FILENAME}
-ldconfig /usr/local/lib
+sudo tar -C /usr/local -xzf ${FILENAME}
+sudo ldconfig /usr/local/lib
+rm ${FILENAME}
+mkdir -p build_ml
+cd build_ml
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=ON ..
+make -j
+cd ..
+./build_ml/KiT-RT tests/input/validation_tests/MN_solver/checkerboard_MN_neural.cfg
 ```
-and for a gpu based version (you need supported hardware and gpu drivers, see here ):
+
+### 5. Debug build
+
 ```bash
-FILENAME=libtensorflow-gpu-linux-x86_64-2.7.0.tar.gz
-wget -q --no-check-certificate https://storage.googleapis.com/tensorflow/libtensorflow/${FILENAME}
-tar -C /usr/local -xzf ${FILENAME}
-ldconfig /usr/local/lib
+mkdir -p build_debug
+cd build_debug
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
+make -j
+cd ..
+./build_debug/KiT-RT tests/input/validation_tests/SN_solver/checkerboard_SN.cfg
 ```
-Or use the docker container
+
+### 6. Test + coverage build
+
 ```bash
-docker run --rm -ti -v $(pwd):/home kitrt/test_ml:latest
+mkdir -p build_coverage
+cd build_coverage
+cmake -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_CODE_COV=ON -DBUILD_UNITY=OFF ..
+make -j
+./unit_tests
+ctest --output-on-failure
+gcovr -r .. --html-details coverage.html
 ```
 
 
