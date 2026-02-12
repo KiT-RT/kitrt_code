@@ -9,6 +9,7 @@
 #include "quadratures/quadraturebase.hpp"
 #include "solvers/snsolver_hpc.hpp"
 #include "toolboxes/textprocessingtoolbox.hpp"
+#include <cassert>
 
 SNSolverHPC::SNSolverHPC( Config* settings ) {
 #ifdef IMPORT_MPI
@@ -286,7 +287,8 @@ void SNSolverHPC::Solve() {
         PrepareVolumeOutput();
         DrawPreSolverOutput();
     }
-    _curSimTime = 0.0;
+    // On restart, continue simulation time from the loaded iteration index.
+    _curSimTime = static_cast<double>( _idx_start_iter ) * _dT;
     auto start  = std::chrono::high_resolution_clock::now();    // Start timing
 
     std::chrono::duration<double> duration;
@@ -311,6 +313,25 @@ void SNSolverHPC::Solve() {
                                 _sol[Idx2D( idx_cell, idx_sys, _localNSys )] );    // Solution averaging with HEUN
                 }
             }
+
+            // Keep scalar flux consistent with the final RK2-averaged solution used in postprocessing.
+            std::vector<double> temp_scalarFluxRK( _nCells, 0.0 );
+#pragma omp parallel for
+            for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+                double localScalarFlux = 0.0;
+#pragma omp simd reduction( + : localScalarFlux )
+                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
+                    localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
+                }
+                temp_scalarFluxRK[idx_cell] = localScalarFlux;
+            }
+#ifdef IMPORT_MPI
+            MPI_Barrier( MPI_COMM_WORLD );
+            MPI_Allreduce( temp_scalarFluxRK.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+            MPI_Barrier( MPI_COMM_WORLD );
+#else
+            _scalarFlux = temp_scalarFluxRK;
+#endif
         }
         else {
 
@@ -334,12 +355,12 @@ void SNSolverHPC::Solve() {
             PrintScreenOutput( iter );
             PrintHistoryOutput( iter );
         }
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
         MPI_Barrier( MPI_COMM_WORLD );
 #endif
 
         PrintVolumeOutput( iter );
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
         MPI_Barrier( MPI_COMM_WORLD );
 #endif
     }
@@ -536,8 +557,9 @@ void SNSolverHPC::FVMUpdate() {
     _mass    = 0.0;
     _rmsFlux = 0.0;
     std::vector<double> temp_scalarFlux( _nCells );    // for MPI allreduce
+    std::vector<double> prev_scalarFlux( _scalarFlux );
 
-#pragma omp parallel for reduction( + : _mass, _rmsFlux )
+#pragma omp parallel for reduction( + : _mass )
     for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
 
 #pragma omp simd
@@ -556,7 +578,6 @@ void SNSolverHPC::FVMUpdate() {
             localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
         }
         _mass += localScalarFlux * _areas[idx_cell];
-        _rmsFlux += ( localScalarFlux - _scalarFlux[idx_cell] ) * ( localScalarFlux - _scalarFlux[idx_cell] );
         temp_scalarFlux[idx_cell] = localScalarFlux;    // set flux
     }
 // MPI Allreduce: _scalarFlux
@@ -564,9 +585,20 @@ void SNSolverHPC::FVMUpdate() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( temp_scalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     MPI_Barrier( MPI_COMM_WORLD );
+    if( _rank == 0 ) {
+        for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+            double diff = _scalarFlux[idx_cell] - prev_scalarFlux[idx_cell];
+            _rmsFlux += diff * diff;
+        }
+    }
 #endif
 #ifndef IMPORT_MPI
     _scalarFlux = temp_scalarFlux;
+#pragma omp parallel for reduction( + : _rmsFlux )
+    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+        double diff = _scalarFlux[idx_cell] - prev_scalarFlux[idx_cell];
+        _rmsFlux += diff * diff;
+    }
 #endif
 }
 
@@ -714,6 +746,7 @@ void SNSolverHPC::IterPostprocessing() {
     double tmp_curScalarOutflow      = 0.0;
     double tmp_curScalarOutflowPeri1 = 0.0;
     double tmp_curScalarOutflowPeri2 = 0.0;
+    double tmp_curMaxOrdinateOutflow = 0.0;
     double tmp_mass                  = 0.0;
     double tmp_rmsFlux               = 0.0;
     MPI_Barrier( MPI_COMM_WORLD );
@@ -725,6 +758,9 @@ void SNSolverHPC::IterPostprocessing() {
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_curScalarOutflowPeri2, &tmp_curScalarOutflowPeri2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     _curScalarOutflowPeri2 = tmp_curScalarOutflowPeri2;
+    MPI_Barrier( MPI_COMM_WORLD );
+    MPI_Allreduce( &_curMaxOrdinateOutflow, &tmp_curMaxOrdinateOutflow, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD );
+    _curMaxOrdinateOutflow = tmp_curMaxOrdinateOutflow;
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( &_mass, &tmp_mass, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     _mass = tmp_mass;
@@ -973,7 +1009,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
                 }
                 idx_field--;
                 break;
-            case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _absorptionValsBlocksGreen[0]; break;
+            case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _varAbsorptionHohlraumGreen; break;
             default: ErrorMessages::Error( "Screen output group not defined!", CURRENT_FUNCTION ); break;
         }
     }
@@ -1318,7 +1354,7 @@ void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
                                 _quadPts[Idx2D( idx_sys, 1, _nDim )] * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
                         }
                     }
-#ifdef BUILD_MPI
+#ifdef IMPORT_MPI
                     MPI_Barrier( MPI_COMM_WORLD );
                     MPI_Allreduce(
                         _outputFields[idx_group][0].data(), _outputFields[idx_group][0].data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
@@ -1455,28 +1491,8 @@ void SNSolverHPC::SetGhostCells() {
 
 void SNSolverHPC::SetProbingCellsLineGreen() {
 
-    // if( _settings->GetProblemName() == PROBLEM_QuarterHohlraum ) {
-    //     double verticalLineWidth   = std::abs( _cornerUpperLeftGreen[1] - _cornerLowerLeftGreen[1] );
-    //     double horizontalLineWidth = std::abs( _cornerUpperLeftGreen[0] - _cornerUpperRightGreen[0] );
-    //
-    //     // double dx = 2 * ( horizontalLineWidth + verticalLineWidth ) / ( (double)_nProbingCellsLineGreen );
-    //
-    //     unsigned nHorizontalProbingCells =
-    //         (unsigned)std::ceil( _nProbingCellsLineGreen * ( horizontalLineWidth / ( horizontalLineWidth + verticalLineWidth ) ) );
-    //     unsigned nVerticalProbingCells = _nProbingCellsLineGreen - nHorizontalProbingCells;
-    //
-    //     _probingCellsLineGreen = std::vector<unsigned>( _nProbingCellsLineGreen );
-    //
-    //     // Sample points on each side of the rectangle
-    //     std::vector<unsigned> side3 = linspace2D( _cornerLowerRightGreen, _cornerUpperRightGreen, nVerticalProbingCells );
-    //     std::vector<unsigned> side4 = linspace2D( _cornerUpperRightGreen, _cornerUpperLeftGreen, nHorizontalProbingCells );
-    //
-    //     //  Combine the points from each side
-    //     _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side3.begin(), side3.end() );
-    //     _probingCellsLineGreen.insert( _probingCellsLineGreen.end(), side4.begin(), side4.end() );
-    // }
-    // else
     if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
+        assert( _nProbingCellsLineGreen % 2 == 0 );
 
         std::vector<double> p1 = { _cornerUpperLeftGreen[0] + _thicknessGreen / 2.0, _cornerUpperLeftGreen[1] - _thicknessGreen / 2.0 };
         std::vector<double> p2 = { _cornerUpperRightGreen[0] - _thicknessGreen / 2.0, _cornerUpperRightGreen[1] - _thicknessGreen / 2.0 };
@@ -1490,6 +1506,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
         unsigned nHorizontalProbingCells = (unsigned)std::ceil( _nProbingCellsLineGreen / 2 * pt_ratio_h );
         unsigned nVerticalProbingCells   = _nProbingCellsLineGreen / 2 - nHorizontalProbingCells;
+        assert( nHorizontalProbingCells > 1 );
+        assert( nVerticalProbingCells > 1 );
 
         _probingCellsLineGreen = std::vector<unsigned>( 2 * ( nVerticalProbingCells + nHorizontalProbingCells ) );
 
@@ -1517,13 +1535,15 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         std::vector<std::vector<std::vector<double>>> block_corners;
 
         double block_size = 0.05;
+        const double cx   = _centerGreen[0];
+        const double cy   = _centerGreen[1];
 
         // Loop to fill the blocks
         for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (upper) (left to right)
 
             // Top row
-            double x1 = -0.2 + i * block_size;
-            double y1 = 0.4;
+            double x1 = -0.2 + cx + i * block_size;
+            double y1 = 0.4 + cy;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1538,8 +1558,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
         for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical)
             // right column double x1 = 0.15;
-            double x1 = 0.15;
-            double y1 = 0.35 - j * block_size;
+            double x1 = 0.15 + cx;
+            double y1 = 0.35 + cy - j * block_size;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1556,8 +1576,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
 
         for( int i = 0; i < 8; ++i ) {    // 8 blocks in the x-direction (horizontal) (lower) (right to left)
             // bottom row
-            double x1 = 0.15 - i * block_size;
-            double y1 = -0.35;
+            double x1 = 0.15 + cx - i * block_size;
+            double y1 = -0.35 + cy;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1573,8 +1593,8 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
         for( int j = 0; j < 14; ++j ) {    // 14 blocks in the y-direction (vertical) (down to up)
 
             // left column
-            double x1 = -0.2;
-            double y1 = -0.3 + j * block_size;
+            double x1 = -0.2 + cx;
+            double y1 = -0.3 + cy + j * block_size;
             double x2 = x1 + block_size;
             double y2 = y1 - block_size;
 
@@ -1628,6 +1648,7 @@ std::vector<unsigned> SNSolverHPC::linspace2D( const std::vector<double>& start,
      */
 
     std::vector<unsigned> result;
+    assert( num_points > 1 );
     result.resize( num_points );
     double stepX = ( end[0] - start[0] ) / ( num_points - 1 );
     double stepY = ( end[1] - start[1] ) / ( num_points - 1 );
@@ -1662,23 +1683,22 @@ void SNSolverHPC::ComputeCellsPerimeterLattice() {
                     continue;    // Skip boundary - ghost cells
                 }
 
-                if( abs( ( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_1 && abs( cellMids[idx_cell][0] ) < l_1 ) ||
-                    abs( ( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_1 && abs( cellMids[idx_cell][1] ) < l_1 ) ) {
+                if( ( abs( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_1 && abs( cellMids[idx_cell][0] ) < l_1 ) ||
+                    ( abs( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_1 && abs( cellMids[idx_cell][1] ) < l_1 ) ) {
                     // neighbor is outside perimeter
                     _cellsLatticePerimeter1[idx_cell].push_back( idx_nbr );
                     _isPerimeterLatticeCell1[idx_cell] = true;
                 }
             }
         }
-        if( abs( cellMids[idx_cell][0] ) < l_2 && abs( cellMids[idx_cell][1] ) < l_2 && abs( cellMids[idx_cell][0] ) > l_1 &&
-            abs( cellMids[idx_cell][1] ) > l_1 ) {
+        else if( abs( cellMids[idx_cell][0] ) < l_2 && abs( cellMids[idx_cell][1] ) < l_2 ) {
             // Cell is within perimeter
             for( unsigned idx_nbr = 0; idx_nbr < _mesh->GetNumNodesPerCell(); ++idx_nbr ) {
                 if( neigbors[idx_cell][idx_nbr] == _mesh->GetNumCells() ) {
                     continue;    // Skip boundary - ghost cells
                 }
-                if( abs( ( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_2 && abs( cellMids[idx_cell][0] ) < l_2 ) ||
-                    abs( ( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_2 && abs( cellMids[idx_cell][1] ) < l_2 ) ) {
+                if( ( abs( cellMids[neigbors[idx_cell][idx_nbr]][0] ) > l_2 && abs( cellMids[idx_cell][0] ) < l_2 ) ||
+                    ( abs( cellMids[neigbors[idx_cell][idx_nbr]][1] ) > l_2 && abs( cellMids[idx_cell][1] ) < l_2 ) ) {
                     // neighbor is outside perimeter
                     _cellsLatticePerimeter2[idx_cell].push_back( idx_nbr );
                     _isPerimeterLatticeCell2[idx_cell] = true;
