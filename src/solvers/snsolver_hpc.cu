@@ -7,11 +7,334 @@
 #include "kernels/scatteringkernelbase.hpp"
 #include "problems/problembase.hpp"
 #include "quadratures/quadraturebase.hpp"
-#include "solvers/snsolver_hpc.hpp"
+#include "solvers/snsolver_hpc_cuda.hpp"
 #include "toolboxes/textprocessingtoolbox.hpp"
+#include <algorithm>
+#include <cuda_runtime.h>
+#include <limits>
+#include <string>
 #include <cassert>
 
-SNSolverHPC::SNSolverHPC( Config* settings ) {
+struct SNSolverHPCCUDA::DeviceBuffers
+{
+    double* areas                = nullptr;
+    double* normals              = nullptr;
+    unsigned* neighbors          = nullptr;
+    int* boundaryTypes           = nullptr;
+    double* ghostCellValues      = nullptr;
+    double* cellMidPoints        = nullptr;
+    double* interfaceMidPoints   = nullptr;
+    double* relativeInterfaceMid = nullptr;
+    double* relativeCellVertices = nullptr;
+
+    double* sigmaS      = nullptr;
+    double* sigmaT      = nullptr;
+    double* source      = nullptr;
+    double* quadPts     = nullptr;
+    double* quadWeights = nullptr;
+
+    double* sol        = nullptr;
+    double* solRK0     = nullptr;
+    double* flux       = nullptr;
+    double* scalarFlux = nullptr;
+    double* solDx      = nullptr;
+    double* limiter    = nullptr;
+};
+
+namespace {
+
+constexpr int CUDA_BLOCK_SIZE = 256;
+
+inline void CheckCuda( cudaError_t status, const std::string& where ) {
+    if( status != cudaSuccess ) {
+        ErrorMessages::Error( "CUDA error in " + where + ": " + std::string( cudaGetErrorString( status ) ), where );
+    }
+}
+
+template <typename T>
+inline void AllocateDeviceArray( T** ptr, std::size_t count, const std::string& name ) {
+    if( count == 0 ) {
+        *ptr = nullptr;
+        return;
+    }
+    CheckCuda( cudaMalloc( reinterpret_cast<void**>( ptr ), count * sizeof( T ) ), "cudaMalloc(" + name + ")" );
+}
+
+template <typename T>
+inline void FreeDeviceArray( T*& ptr, const std::string& name ) {
+    if( ptr == nullptr ) return;
+    CheckCuda( cudaFree( ptr ), "cudaFree(" + name + ")" );
+    ptr = nullptr;
+}
+
+__device__ __forceinline__ unsigned long Idx2DDevice( unsigned long idx1, unsigned long idx2, unsigned long len2 ) { return idx1 * len2 + idx2; }
+
+__device__ __forceinline__ unsigned long Idx3DDevice( unsigned long idx1, unsigned long idx2, unsigned long idx3, unsigned long len2, unsigned long len3 ) {
+    return idx1 * len2 * len3 + idx2 * len3 + idx3;
+}
+
+__global__ void FluxOrder1Kernel( unsigned long nCells,
+                                  unsigned long localNSys,
+                                  unsigned long nNbr,
+                                  unsigned long nDim,
+                                  const double* __restrict__ quadPts,
+                                  const double* __restrict__ normals,
+                                  const unsigned* __restrict__ neighbors,
+                                  const int* __restrict__ boundaryTypes,
+                                  const double* __restrict__ ghostCellValues,
+                                  const double* __restrict__ sol,
+                                  double* flux,
+                                  int neumannBoundary ) {
+    const unsigned long linearIdx = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
+    const unsigned long nCellSys  = nCells * localNSys;
+    if( linearIdx >= nCellSys ) return;
+
+    const unsigned long idxCell = linearIdx / localNSys;
+    const unsigned long idxSys  = linearIdx % localNSys;
+
+    double localFlux = 0.0;
+    for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
+        const unsigned nbrCell = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
+        const double localInner =
+            quadPts[Idx2DDevice( idxSys, 0, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+            quadPts[Idx2DDevice( idxSys, 1, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
+
+        if( boundaryTypes[idxCell] == neumannBoundary && nbrCell == nCells ) {
+            localFlux += ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
+                                              : localInner * ghostCellValues[Idx2DDevice( idxCell, idxSys, localNSys )];
+        }
+        else {
+            localFlux +=
+                ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
+                                     : localInner * sol[Idx2DDevice( static_cast<unsigned long>( nbrCell ), idxSys, localNSys )];
+        }
+    }
+    flux[Idx2DDevice( idxCell, idxSys, localNSys )] = localFlux;
+}
+
+__global__ void FluxOrder2SlopeKernel( unsigned long nCells,
+                                       unsigned long localNSys,
+                                       unsigned long nNbr,
+                                       unsigned long nDim,
+                                       const double* __restrict__ areas,
+                                       const double* __restrict__ normals,
+                                       const unsigned* __restrict__ neighbors,
+                                       const int* __restrict__ boundaryTypes,
+                                       const double* __restrict__ sol,
+                                       double* solDx,
+                                       double* limiter,
+                                       int noneBoundary ) {
+    const unsigned long linearIdx = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
+    const unsigned long nCellSys  = nCells * localNSys;
+    if( linearIdx >= nCellSys ) return;
+
+    const unsigned long idxCell = linearIdx / localNSys;
+    const unsigned long idxSys  = linearIdx % localNSys;
+
+    const unsigned long limiterIdx = Idx2DDevice( idxCell, idxSys, localNSys );
+    const unsigned long solDxXIdx  = Idx3DDevice( idxCell, idxSys, 0, localNSys, nDim );
+    const unsigned long solDxYIdx  = Idx3DDevice( idxCell, idxSys, 1, localNSys, nDim );
+
+    if( boundaryTypes[idxCell] != noneBoundary ) {
+        limiter[limiterIdx] = 0.0;
+        solDx[solDxXIdx]    = 0.0;
+        solDx[solDxYIdx]    = 0.0;
+        return;
+    }
+
+    double slopeX = 0.0;
+    double slopeY = 0.0;
+    const double thisSol = sol[Idx2DDevice( idxCell, idxSys, localNSys )];
+
+    for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
+        const unsigned nbrCell = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
+        const double avgVal    = 0.5 * ( thisSol + sol[Idx2DDevice( static_cast<unsigned long>( nbrCell ), idxSys, localNSys )] );
+        slopeX += avgVal * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )];
+        slopeY += avgVal * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
+    }
+
+    slopeX /= areas[idxCell];
+    slopeY /= areas[idxCell];
+
+    limiter[limiterIdx] = 1.0;
+    solDx[solDxXIdx]    = slopeX;
+    solDx[solDxYIdx]    = slopeY;
+}
+
+__global__ void FluxOrder2LimiterKernel( unsigned long nCells,
+                                         unsigned long localNSys,
+                                         unsigned long nNbr,
+                                         unsigned long nDim,
+                                         const double* __restrict__ areas,
+                                         const unsigned* __restrict__ neighbors,
+                                         const int* __restrict__ boundaryTypes,
+                                         const double* __restrict__ relativeCellVertices,
+                                         const double* __restrict__ sol,
+                                         const double* __restrict__ solDx,
+                                         double* limiter,
+                                         int noneBoundary,
+                                         double eps ) {
+    const unsigned long linearIdx = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
+    const unsigned long nCellSys  = nCells * localNSys;
+    if( linearIdx >= nCellSys ) return;
+
+    const unsigned long idxCell = linearIdx / localNSys;
+    const unsigned long idxSys  = linearIdx % localNSys;
+    if( boundaryTypes[idxCell] != noneBoundary ) return;
+
+    const unsigned long solIdx = Idx2DDevice( idxCell, idxSys, localNSys );
+    const double thisSol       = sol[solIdx];
+
+    double minSol = thisSol;
+    double maxSol = thisSol;
+    for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
+        const unsigned nbrCell = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
+        const double nbrSol    = sol[Idx2DDevice( static_cast<unsigned long>( nbrCell ), idxSys, localNSys )];
+        maxSol                 = fmax( maxSol, nbrSol );
+        minSol                 = fmin( minSol, nbrSol );
+    }
+
+    double limVal  = 1.0;
+    const double d = areas[idxCell];
+    const double sx = solDx[Idx3DDevice( idxCell, idxSys, 0, localNSys, nDim )];
+    const double sy = solDx[Idx3DDevice( idxCell, idxSys, 1, localNSys, nDim )];
+
+    for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
+        const double gaussPoint = sx * relativeCellVertices[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+                                  sy * relativeCellVertices[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
+
+        const double delta1Max = maxSol - thisSol;
+        const double delta1Min = minSol - thisSol;
+        double r               = 1.0;
+        if( gaussPoint > 0.0 ) {
+            r = ( ( delta1Max * delta1Max + d ) * gaussPoint + 2.0 * gaussPoint * gaussPoint * delta1Max ) /
+                ( delta1Max * delta1Max + 2.0 * gaussPoint * gaussPoint + delta1Max * gaussPoint + d ) / ( gaussPoint + eps );
+        }
+        else {
+            r = ( ( delta1Min * delta1Min + d ) * gaussPoint + 2.0 * gaussPoint * gaussPoint * delta1Min ) /
+                ( delta1Min * delta1Min + 2.0 * gaussPoint * gaussPoint + delta1Min * gaussPoint + d ) / ( gaussPoint - eps );
+        }
+        if( fabs( gaussPoint ) < eps ) {
+            r = 1.0;
+        }
+        limVal = fmin( limVal, r );
+    }
+    limiter[solIdx] = limVal;
+}
+
+__global__ void FluxOrder2Kernel( unsigned long nCells,
+                                  unsigned long localNSys,
+                                  unsigned long nNbr,
+                                  unsigned long nDim,
+                                  const double* __restrict__ quadPts,
+                                  const double* __restrict__ normals,
+                                  const unsigned* __restrict__ neighbors,
+                                  const int* __restrict__ boundaryTypes,
+                                  const double* __restrict__ ghostCellValues,
+                                  const double* __restrict__ interfaceMidPoints,
+                                  const double* __restrict__ cellMidPoints,
+                                  const double* __restrict__ relativeInterfaceMid,
+                                  const double* __restrict__ sol,
+                                  const double* __restrict__ solDx,
+                                  const double* __restrict__ limiter,
+                                  double* flux,
+                                  int neumannBoundary ) {
+    const unsigned long linearIdx = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
+    const unsigned long nCellSys  = nCells * localNSys;
+    if( linearIdx >= nCellSys ) return;
+
+    const unsigned long idxCell = linearIdx / localNSys;
+    const unsigned long idxSys  = linearIdx % localNSys;
+
+    double localFlux = 0.0;
+    for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
+        const unsigned nbrCell = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
+        const double localInner =
+            quadPts[Idx2DDevice( idxSys, 0, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+            quadPts[Idx2DDevice( idxSys, 1, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
+
+        if( boundaryTypes[idxCell] == neumannBoundary && nbrCell == nCells ) {
+            localFlux += ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
+                                              : localInner * ghostCellValues[Idx2DDevice( idxCell, idxSys, localNSys )];
+            continue;
+        }
+
+        if( localInner > 0.0 ) {
+            const double recVal = sol[Idx2DDevice( idxCell, idxSys, localNSys )] +
+                                  limiter[Idx2DDevice( idxCell, idxSys, localNSys )] *
+                                      ( solDx[Idx3DDevice( idxCell, idxSys, 0, localNSys, nDim )] *
+                                            relativeInterfaceMid[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+                                        solDx[Idx3DDevice( idxCell, idxSys, 1, localNSys, nDim )] *
+                                            relativeInterfaceMid[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )] );
+            localFlux += localInner * recVal;
+        }
+        else {
+            const unsigned long nbrCellUL = static_cast<unsigned long>( nbrCell );
+            const double recVal           = sol[Idx2DDevice( nbrCellUL, idxSys, localNSys )] +
+                                  limiter[Idx2DDevice( nbrCellUL, idxSys, localNSys )] *
+                                      ( solDx[Idx3DDevice( nbrCellUL, idxSys, 0, localNSys, nDim )] *
+                                            ( interfaceMidPoints[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] -
+                                              cellMidPoints[Idx2DDevice( nbrCellUL, 0, nDim )] ) +
+                                        solDx[Idx3DDevice( nbrCellUL, idxSys, 1, localNSys, nDim )] *
+                                            ( interfaceMidPoints[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )] -
+                                              cellMidPoints[Idx2DDevice( nbrCellUL, 1, nDim )] ) );
+            localFlux += localInner * recVal;
+        }
+    }
+
+    flux[Idx2DDevice( idxCell, idxSys, localNSys )] = localFlux;
+}
+
+__global__ void FVMUpdateKernel( unsigned long nCells,
+                                 unsigned long localNSys,
+                                 double dT,
+                                 const double* __restrict__ sigmaS,
+                                 const double* __restrict__ sigmaT,
+                                 const double* __restrict__ source,
+                                 const double* __restrict__ areas,
+                                 const double* __restrict__ quadWeights,
+                                 const double* __restrict__ flux,
+                                 double* sol,
+                                 double* scalarFlux,
+                                 double invTwoPi ) {
+    const unsigned long idxCell = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
+    if( idxCell >= nCells ) return;
+
+    const double scattering = sigmaS[idxCell] * scalarFlux[idxCell] * invTwoPi;
+    double localScalarFlux  = 0.0;
+
+    for( unsigned long idxSys = 0; idxSys < localNSys; ++idxSys ) {
+        const unsigned long idx = Idx2DDevice( idxCell, idxSys, localNSys );
+        double newVal           = ( 1.0 - dT * sigmaT[idxCell] ) * sol[idx] - dT / areas[idxCell] * flux[idx] + dT * ( scattering + source[idx] );
+        newVal                  = fmax( newVal, 0.0 );
+        sol[idx]                = newVal;
+        localScalarFlux += newVal * quadWeights[idxSys];
+    }
+    scalarFlux[idxCell] = localScalarFlux;
+}
+
+__global__ void RK2AverageAndScalarFluxKernel( unsigned long nCells,
+                                                unsigned long localNSys,
+                                                const double* __restrict__ quadWeights,
+                                                const double* __restrict__ solRK0,
+                                                double* sol,
+                                                double* scalarFlux ) {
+    const unsigned long idxCell = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
+    if( idxCell >= nCells ) return;
+
+    double localScalarFlux = 0.0;
+    for( unsigned long idxSys = 0; idxSys < localNSys; ++idxSys ) {
+        const unsigned long idx = Idx2DDevice( idxCell, idxSys, localNSys );
+        const double avgVal      = 0.5 * ( solRK0[idx] + sol[idx] );
+        sol[idx]                 = avgVal;
+        localScalarFlux += avgVal * quadWeights[idxSys];
+    }
+    scalarFlux[idxCell] = localScalarFlux;
+}
+
+}    // namespace
+
+SNSolverHPCCUDA::SNSolverHPCCUDA( Config* settings ) {
 #ifdef IMPORT_MPI
     // Initialize MPI
     MPI_Comm_size( MPI_COMM_WORLD, &_numProcs );
@@ -25,6 +348,9 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     _currTime       = 0.0;
     _idx_start_iter = 0;
     _nOutputMoments = 2;    //  Currently only u_1 (x direction) and u_1 (y direction) are supported
+    _cudaInitialized = false;
+    _cudaDeviceId    = 0;
+    _device          = nullptr;
     // Create Mesh
     _mesh = LoadSU2MeshFromFile( settings );
     _settings->SetNCells( _mesh->GetNumCells() );
@@ -168,6 +494,7 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
 
             _scalarFlux[idx_cell] += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
         }
+        // _mass += _scalarFlux[idx_cell] * _areas[idx_cell];
     }
 
     // Lattice
@@ -211,6 +538,10 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     MPI_Barrier( MPI_COMM_WORLD );
 #endif
     SetGhostCells();
+    InitCUDA();
+    UploadStaticDataToDevice();
+    UploadStateToDevice();
+
     if( _rank == 0 ) {
         PrepareScreenOutput();     // Screen Output
         PrepareHistoryOutput();    // History Output
@@ -275,12 +606,168 @@ SNSolverHPC::SNSolverHPC( Config* settings ) {
     }
 }
 
-SNSolverHPC::~SNSolverHPC() {
+void SNSolverHPCCUDA::InitCUDA() {
+    int nDevices = 0;
+    CheckCuda( cudaGetDeviceCount( &nDevices ), "cudaGetDeviceCount" );
+    if( nDevices < 1 ) {
+        ErrorMessages::Error( "No CUDA-capable GPU detected, but SNSolverHPCCUDA was requested.", CURRENT_FUNCTION );
+    }
+
+    _cudaDeviceId = 0;    // first version: pin to one GPU
+    CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
+
+    _device = new DeviceBuffers();
+
+    const std::size_t nCells      = static_cast<std::size_t>( _nCells );
+    const std::size_t nCellNbr    = nCells * static_cast<std::size_t>( _nNbr );
+    const std::size_t nCellNbrDim = nCellNbr * static_cast<std::size_t>( _nDim );
+    const std::size_t nCellSys    = nCells * static_cast<std::size_t>( _localNSys );
+    const std::size_t nSysDim     = static_cast<std::size_t>( _localNSys ) * static_cast<std::size_t>( _nDim );
+
+    AllocateDeviceArray( &_device->areas, nCells, "areas" );
+    AllocateDeviceArray( &_device->normals, nCellNbrDim, "normals" );
+    AllocateDeviceArray( &_device->neighbors, nCellNbr, "neighbors" );
+    AllocateDeviceArray( &_device->boundaryTypes, nCells, "boundaryTypes" );
+    AllocateDeviceArray( &_device->ghostCellValues, nCellSys, "ghostCellValues" );
+    AllocateDeviceArray( &_device->cellMidPoints, nCells * static_cast<std::size_t>( _nDim ), "cellMidPoints" );
+    AllocateDeviceArray( &_device->interfaceMidPoints, nCellNbrDim, "interfaceMidPoints" );
+    AllocateDeviceArray( &_device->relativeInterfaceMid, nCellNbrDim, "relativeInterfaceMid" );
+    AllocateDeviceArray( &_device->relativeCellVertices, nCellNbrDim, "relativeCellVertices" );
+
+    AllocateDeviceArray( &_device->sigmaS, nCells, "sigmaS" );
+    AllocateDeviceArray( &_device->sigmaT, nCells, "sigmaT" );
+    AllocateDeviceArray( &_device->source, nCellSys, "source" );
+    AllocateDeviceArray( &_device->quadPts, nSysDim, "quadPts" );
+    AllocateDeviceArray( &_device->quadWeights, static_cast<std::size_t>( _localNSys ), "quadWeights" );
+
+    AllocateDeviceArray( &_device->sol, nCellSys, "sol" );
+    AllocateDeviceArray( &_device->solRK0, nCellSys, "solRK0" );
+    AllocateDeviceArray( &_device->flux, nCellSys, "flux" );
+    AllocateDeviceArray( &_device->scalarFlux, nCells, "scalarFlux" );
+    AllocateDeviceArray( &_device->solDx, nCellSys * static_cast<std::size_t>( _nDim ), "solDx" );
+    AllocateDeviceArray( &_device->limiter, nCellSys, "limiter" );
+
+    _cudaInitialized = true;
+}
+
+void SNSolverHPCCUDA::UploadStaticDataToDevice() {
+    if( !_cudaInitialized || _device == nullptr ) {
+        ErrorMessages::Error( "CUDA backend was not initialized before UploadStaticDataToDevice.", CURRENT_FUNCTION );
+    }
+
+    _cellBoundaryTypesInt.resize( _nCells, static_cast<int>( BOUNDARY_TYPE::INVALID ) );
+#pragma omp parallel for
+    for( unsigned long idxCell = 0; idxCell < _nCells; ++idxCell ) {
+        _cellBoundaryTypesInt[idxCell] = static_cast<int>( _cellBoundaryTypes[idxCell] );
+    }
+
+    _ghostCellValues.assign( static_cast<std::size_t>( _nCells ) * static_cast<std::size_t>( _localNSys ), 0.0 );
+    for( const auto& cellEntry : _ghostCells ) {
+        const unsigned idxCell             = cellEntry.first;
+        const std::vector<double>& values  = cellEntry.second;
+        const unsigned long nGhostOrdinate = std::min<unsigned long>( _localNSys, static_cast<unsigned long>( values.size() ) );
+        for( unsigned long idxSys = 0; idxSys < nGhostOrdinate; ++idxSys ) {
+            _ghostCellValues[Idx2D( idxCell, idxSys, _localNSys )] = values[idxSys];
+        }
+    }
+
+    const std::size_t nCells      = static_cast<std::size_t>( _nCells );
+    const std::size_t nCellNbr    = nCells * static_cast<std::size_t>( _nNbr );
+    const std::size_t nCellNbrDim = nCellNbr * static_cast<std::size_t>( _nDim );
+    const std::size_t nCellSys    = nCells * static_cast<std::size_t>( _localNSys );
+    const std::size_t nSysDim     = static_cast<std::size_t>( _localNSys ) * static_cast<std::size_t>( _nDim );
+
+    CheckCuda( cudaMemcpy( _device->areas, _areas.data(), nCells * sizeof( double ), cudaMemcpyHostToDevice ), "copy areas" );
+    CheckCuda( cudaMemcpy( _device->normals, _normals.data(), nCellNbrDim * sizeof( double ), cudaMemcpyHostToDevice ), "copy normals" );
+    CheckCuda( cudaMemcpy( _device->neighbors, _neighbors.data(), nCellNbr * sizeof( unsigned ), cudaMemcpyHostToDevice ), "copy neighbors" );
+    CheckCuda( cudaMemcpy( _device->boundaryTypes, _cellBoundaryTypesInt.data(), nCells * sizeof( int ), cudaMemcpyHostToDevice ),
+               "copy boundary types" );
+    CheckCuda( cudaMemcpy( _device->ghostCellValues, _ghostCellValues.data(), nCellSys * sizeof( double ), cudaMemcpyHostToDevice ),
+               "copy ghost values" );
+    CheckCuda(
+        cudaMemcpy( _device->cellMidPoints, _cellMidPoints.data(), nCells * static_cast<std::size_t>( _nDim ) * sizeof( double ), cudaMemcpyHostToDevice ),
+        "copy cell midpoints" );
+    CheckCuda( cudaMemcpy( _device->interfaceMidPoints, _interfaceMidPoints.data(), nCellNbrDim * sizeof( double ), cudaMemcpyHostToDevice ),
+               "copy interface midpoints" );
+    CheckCuda( cudaMemcpy( _device->relativeInterfaceMid, _relativeInterfaceMidPt.data(), nCellNbrDim * sizeof( double ), cudaMemcpyHostToDevice ),
+               "copy relative interface points" );
+    CheckCuda( cudaMemcpy( _device->relativeCellVertices, _relativeCellVertices.data(), nCellNbrDim * sizeof( double ), cudaMemcpyHostToDevice ),
+               "copy relative vertices" );
+    CheckCuda( cudaMemcpy( _device->sigmaS, _sigmaS.data(), nCells * sizeof( double ), cudaMemcpyHostToDevice ), "copy sigmaS" );
+    CheckCuda( cudaMemcpy( _device->sigmaT, _sigmaT.data(), nCells * sizeof( double ), cudaMemcpyHostToDevice ), "copy sigmaT" );
+    CheckCuda( cudaMemcpy( _device->source, _source.data(), nCellSys * sizeof( double ), cudaMemcpyHostToDevice ), "copy source" );
+    CheckCuda( cudaMemcpy( _device->quadPts, _quadPts.data(), nSysDim * sizeof( double ), cudaMemcpyHostToDevice ), "copy quad points" );
+    CheckCuda( cudaMemcpy( _device->quadWeights, _quadWeights.data(), static_cast<std::size_t>( _localNSys ) * sizeof( double ), cudaMemcpyHostToDevice ),
+               "copy quad weights" );
+
+    CheckCuda( cudaMemset( _device->flux, 0, nCellSys * sizeof( double ) ), "init flux" );
+    CheckCuda( cudaMemcpy( _device->solDx, _solDx.data(), nCellSys * static_cast<std::size_t>( _nDim ) * sizeof( double ), cudaMemcpyHostToDevice ),
+               "init solDx" );
+    CheckCuda( cudaMemcpy( _device->limiter, _limiter.data(), nCellSys * sizeof( double ), cudaMemcpyHostToDevice ), "init limiter" );
+}
+
+void SNSolverHPCCUDA::UploadStateToDevice() {
+    if( !_cudaInitialized || _device == nullptr ) {
+        ErrorMessages::Error( "CUDA backend was not initialized before UploadStateToDevice.", CURRENT_FUNCTION );
+    }
+    const std::size_t nCells   = static_cast<std::size_t>( _nCells );
+    const std::size_t nCellSys = nCells * static_cast<std::size_t>( _localNSys );
+
+    CheckCuda( cudaMemcpy( _device->sol, _sol.data(), nCellSys * sizeof( double ), cudaMemcpyHostToDevice ), "upload sol" );
+    CheckCuda( cudaMemcpy( _device->scalarFlux, _scalarFlux.data(), nCells * sizeof( double ), cudaMemcpyHostToDevice ), "upload scalar flux" );
+}
+
+void SNSolverHPCCUDA::DownloadStateFromDevice() {
+    if( !_cudaInitialized || _device == nullptr ) {
+        ErrorMessages::Error( "CUDA backend was not initialized before DownloadStateFromDevice.", CURRENT_FUNCTION );
+    }
+    const std::size_t nCells   = static_cast<std::size_t>( _nCells );
+    const std::size_t nCellSys = nCells * static_cast<std::size_t>( _localNSys );
+
+    CheckCuda( cudaMemcpy( _sol.data(), _device->sol, nCellSys * sizeof( double ), cudaMemcpyDeviceToHost ), "download sol" );
+    CheckCuda( cudaMemcpy( _scalarFlux.data(), _device->scalarFlux, nCells * sizeof( double ), cudaMemcpyDeviceToHost ), "download scalar flux" );
+}
+
+void SNSolverHPCCUDA::FreeCUDA() {
+    if( !_cudaInitialized || _device == nullptr ) {
+        return;
+    }
+
+    CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
+
+    FreeDeviceArray( _device->areas, "areas" );
+    FreeDeviceArray( _device->normals, "normals" );
+    FreeDeviceArray( _device->neighbors, "neighbors" );
+    FreeDeviceArray( _device->boundaryTypes, "boundaryTypes" );
+    FreeDeviceArray( _device->ghostCellValues, "ghostCellValues" );
+    FreeDeviceArray( _device->cellMidPoints, "cellMidPoints" );
+    FreeDeviceArray( _device->interfaceMidPoints, "interfaceMidPoints" );
+    FreeDeviceArray( _device->relativeInterfaceMid, "relativeInterfaceMid" );
+    FreeDeviceArray( _device->relativeCellVertices, "relativeCellVertices" );
+    FreeDeviceArray( _device->sigmaS, "sigmaS" );
+    FreeDeviceArray( _device->sigmaT, "sigmaT" );
+    FreeDeviceArray( _device->source, "source" );
+    FreeDeviceArray( _device->quadPts, "quadPts" );
+    FreeDeviceArray( _device->quadWeights, "quadWeights" );
+    FreeDeviceArray( _device->sol, "sol" );
+    FreeDeviceArray( _device->solRK0, "solRK0" );
+    FreeDeviceArray( _device->flux, "flux" );
+    FreeDeviceArray( _device->scalarFlux, "scalarFlux" );
+    FreeDeviceArray( _device->solDx, "solDx" );
+    FreeDeviceArray( _device->limiter, "limiter" );
+
+    delete _device;
+    _device          = nullptr;
+    _cudaInitialized = false;
+}
+
+SNSolverHPCCUDA::~SNSolverHPCCUDA() {
+    FreeCUDA();
     delete _mesh;
     delete _problem;
 }
 
-void SNSolverHPC::Solve() {
+void SNSolverHPCCUDA::Solve() {
 
     // --- Preprocessing ---
     if( _rank == 0 ) {
@@ -299,46 +786,33 @@ void SNSolverHPC::Solve() {
             _dT = _settings->GetTEnd() - iter * _dT;
         }
         _scalarFluxPrevIter = _scalarFlux;
-        if( _temporalOrder == 2 ) {
-            std::vector<double> solRK0( _sol );
-            ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
-            FVMUpdate();
-            ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
-            FVMUpdate();
-#pragma omp parallel for
-            for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-#pragma omp simd
-                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                    _sol[Idx2D( idx_cell, idx_sys, _localNSys )] =
-                        0.5 * ( solRK0[Idx2D( idx_cell, idx_sys, _localNSys )] +
-                                _sol[Idx2D( idx_cell, idx_sys, _localNSys )] );    // Solution averaging with HEUN
-                }
-            }
 
-            // Keep scalar flux consistent with the final RK2-averaged solution used in postprocessing.
-            std::vector<double> temp_scalarFluxRK( _nCells, 0.0 );
-#pragma omp parallel for
-            for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-                double localScalarFlux = 0.0;
-#pragma omp simd reduction( + : localScalarFlux )
-                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                    localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
-                }
-                temp_scalarFluxRK[idx_cell] = localScalarFlux;
-            }
-#ifdef IMPORT_MPI
-            MPI_Barrier( MPI_COMM_WORLD );
-            MPI_Allreduce( temp_scalarFluxRK.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
-            MPI_Barrier( MPI_COMM_WORLD );
-#else
-            _scalarFlux = temp_scalarFluxRK;
-#endif
+        if( _temporalOrder == 2 ) {
+            CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
+            CheckCuda( cudaMemcpy( _device->solRK0,
+                                   _device->sol,
+                                   static_cast<std::size_t>( _nCells ) * static_cast<std::size_t>( _localNSys ) * sizeof( double ),
+                                   cudaMemcpyDeviceToDevice ),
+                       "backup solRK0" );
+
+            ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
+            FVMUpdate();
+            ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
+            FVMUpdate();
+
+            const dim3 threads( CUDA_BLOCK_SIZE );
+            const dim3 gridCells( static_cast<unsigned>( ( _nCells + CUDA_BLOCK_SIZE - 1 ) / CUDA_BLOCK_SIZE ) );
+            RK2AverageAndScalarFluxKernel<<<gridCells, threads>>>(
+                _nCells, _localNSys, _device->quadWeights, _device->solRK0, _device->sol, _device->scalarFlux );
+            CheckCuda( cudaGetLastError(), "RK2AverageAndScalarFluxKernel launch" );
         }
         else {
-
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
             FVMUpdate();
         }
+
+        DownloadStateFromDevice();
+
         _curSimTime += _dT;
         IterPostprocessing();
         // --- Wall time measurement
@@ -371,224 +845,121 @@ void SNSolverHPC::Solve() {
     }
 }
 
-void SNSolverHPC::FluxOrder2() {
+void SNSolverHPCCUDA::FluxOrder2() {
+    CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
+    const unsigned long nCellSys = _nCells * _localNSys;
+    const dim3 threads( CUDA_BLOCK_SIZE );
+    const dim3 gridCellSys( static_cast<unsigned>( ( nCellSys + CUDA_BLOCK_SIZE - 1 ) / CUDA_BLOCK_SIZE ) );
+    const double eps = 1e-10;
 
-    double const eps = 1e-10;
+    FluxOrder2SlopeKernel<<<gridCellSys, threads>>>( _nCells,
+                                                     _localNSys,
+                                                     _nNbr,
+                                                     _nDim,
+                                                     _device->areas,
+                                                     _device->normals,
+                                                     _device->neighbors,
+                                                     _device->boundaryTypes,
+                                                     _device->sol,
+                                                     _device->solDx,
+                                                     _device->limiter,
+                                                     static_cast<int>( BOUNDARY_TYPE::NONE ) );
+    CheckCuda( cudaGetLastError(), "FluxOrder2SlopeKernel launch" );
 
-#pragma omp parallel for
-    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {            // Compute Slopes
-        if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NONE ) {                // skip ghost cells
-                                                                                   // #pragma omp simd
-            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {    //
-                _limiter[Idx2D( idx_cell, idx_sys, _localNSys )]         = 1.;     // limiter should be zero at boundary//
-                _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] = 0.;
-                _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] = 0.;    //
-                double solInterfaceAvg                                   = 0.0;
-                for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {            // Compute slopes and mininum and maximum
-                    unsigned nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    //
-                    // Slopes
-                    solInterfaceAvg = 0.5 * ( _sol[Idx2D( idx_cell, idx_sys, _localNSys )] + _sol[Idx2D( nbr_glob, idx_sys, _localNSys )] );
-                    _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] +=
-                        solInterfaceAvg * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )];
-                    _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] +=
-                        solInterfaceAvg * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-                }    //
-                _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] /= _areas[idx_cell];
-                _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] /= _areas[idx_cell];
-            }
-        }
-    }
-#pragma omp parallel for
-    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {    // Compute Limiter
-        if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NONE ) {        // skip ghost cells
+    FluxOrder2LimiterKernel<<<gridCellSys, threads>>>( _nCells,
+                                                       _localNSys,
+                                                       _nNbr,
+                                                       _nDim,
+                                                       _device->areas,
+                                                       _device->neighbors,
+                                                       _device->boundaryTypes,
+                                                       _device->relativeCellVertices,
+                                                       _device->sol,
+                                                       _device->solDx,
+                                                       _device->limiter,
+                                                       static_cast<int>( BOUNDARY_TYPE::NONE ),
+                                                       eps );
+    CheckCuda( cudaGetLastError(), "FluxOrder2LimiterKernel launch" );
 
-#pragma omp simd
-            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-
-                double gaussPoint = 0;
-                double r          = 0;
-                double minSol     = _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
-                double maxSol     = _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
-
-                for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {    // Compute slopes and mininum and maximum
-                    unsigned nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];
-                    // Compute ptswise max and minimum solultion values of current and neighbor cells
-                    maxSol = std::max( _sol[Idx2D( nbr_glob, idx_sys, _localNSys )], maxSol );
-                    minSol = std::min( _sol[Idx2D( nbr_glob, idx_sys, _localNSys )], minSol );
-                }
-
-                for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; idx_nbr++ ) {    // Compute limiter, see https://arxiv.org/pdf/1710.07187.pdf
-
-                    // Compute test value at cell vertex, called gaussPt
-                    gaussPoint =
-                        _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] *
-                            _relativeCellVertices[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
-                        _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] * _relativeCellVertices[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-
-                    // BARTH-JESPERSEN LIMITER
-                    // r = ( gaussPoint > 0 ) ? std::min( ( maxSol - _sol[Idx2D( idx_cell, idx_sys, _localNSys )] ) / ( gaussPoint + eps ), 1.0 )
-                    //                       : std::min( ( minSol - _sol[Idx2D( idx_cell, idx_sys, _localNSys )] ) / ( gaussPoint - eps ), 1.0 );
-                    //
-                    // r = ( std::abs( gaussPoint ) < eps ) ? 1 : r;
-                    //_limiter[Idx2D( idx_cell, idx_sys, _localNSys )] = std::min( r, _limiter[Idx2D( idx_cell, idx_sys, _localNSys )] );
-
-                    // VENKATAKRISHNAN LIMITER
-                    double delta1Max = maxSol - _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
-                    double delta1Min = minSol - _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
-
-                    r = ( gaussPoint > 0 ) ? ( ( delta1Max * delta1Max + _areas[idx_cell] ) * gaussPoint + 2 * gaussPoint * gaussPoint * delta1Max ) /
-                                                 ( delta1Max * delta1Max + 2 * gaussPoint * gaussPoint + delta1Max * gaussPoint + _areas[idx_cell] ) /
-                                                 ( gaussPoint + eps )
-                                           : ( ( delta1Min * delta1Min + _areas[idx_cell] ) * gaussPoint + 2 * gaussPoint * gaussPoint * delta1Min ) /
-                                                 ( delta1Min * delta1Min + 2 * gaussPoint * gaussPoint + delta1Min * gaussPoint + _areas[idx_cell] ) /
-                                                 ( gaussPoint - eps );
-
-                    r = ( std::abs( gaussPoint ) < eps ) ? 1 : r;
-
-                    _limiter[Idx2D( idx_cell, idx_sys, _localNSys )] = std::min( r, _limiter[Idx2D( idx_cell, idx_sys, _localNSys )] );
-                }
-            }
-        }
-        else {
-#pragma omp simd
-            for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                _limiter[Idx2D( idx_cell, idx_sys, _localNSys )]         = 0.;    // limiter should be zero at boundary
-                _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] = 0.;
-                _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] = 0.;
-            }
-        }
-    }
-#pragma omp parallel for
-    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {    // Compute Flux
-#pragma omp simd
-        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-            _flux[Idx2D( idx_cell, idx_sys, _localNSys )] = 0.;
-        }
-
-        // Fluxes
-        for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
-            if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NEUMANN && _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )] == _nCells ) {
-                // #pragma omp simd
-                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                    double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
-                                        _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-                    if( localInner > 0 ) {
-                        _flux[Idx2D( idx_cell, idx_sys, _localNSys )] += localInner * _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
-                    }
-                    else {
-                        double ghostCellValue = _ghostCells[idx_cell][idx_sys];    // fixed boundary
-                        _flux[Idx2D( idx_cell, idx_sys, _localNSys )] += localInner * ghostCellValue;
-                    }
-                }
-            }
-            else {
-
-                unsigned long nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    // global idx of neighbor cell
-                                                                                           // Second order
-#pragma omp simd
-                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                    // store flux contribution on psiNew_sigmaS to save memory
-                    double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
-                                        _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-
-                    _flux[Idx2D( idx_cell, idx_sys, _localNSys )] +=
-                        ( localInner > 0 ) ? localInner * ( _sol[Idx2D( idx_cell, idx_sys, _localNSys )] +
-                                                            _limiter[Idx2D( idx_cell, idx_sys, _localNSys )] *
-                                                                ( _solDx[Idx3D( idx_cell, idx_sys, 0, _localNSys, _nDim )] *
-                                                                      _relativeInterfaceMidPt[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
-                                                                  _solDx[Idx3D( idx_cell, idx_sys, 1, _localNSys, _nDim )] *
-                                                                      _relativeInterfaceMidPt[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )] ) )
-                                           : localInner * ( _sol[Idx2D( nbr_glob, idx_sys, _localNSys )] +
-                                                            _limiter[Idx2D( nbr_glob, idx_sys, _localNSys )] *
-                                                                ( _solDx[Idx3D( nbr_glob, idx_sys, 0, _localNSys, _nDim )] *
-                                                                      ( _interfaceMidPoints[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] -
-                                                                        _cellMidPoints[Idx2D( nbr_glob, 0, _nDim )] ) +
-                                                                  _solDx[Idx3D( nbr_glob, idx_sys, 1, _localNSys, _nDim )] *
-                                                                      ( _interfaceMidPoints[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )] -
-                                                                        _cellMidPoints[Idx2D( nbr_glob, 1, _nDim )] ) ) );
-                }
-            }
-        }
-    }
+    FluxOrder2Kernel<<<gridCellSys, threads>>>( _nCells,
+                                                _localNSys,
+                                                _nNbr,
+                                                _nDim,
+                                                _device->quadPts,
+                                                _device->normals,
+                                                _device->neighbors,
+                                                _device->boundaryTypes,
+                                                _device->ghostCellValues,
+                                                _device->interfaceMidPoints,
+                                                _device->cellMidPoints,
+                                                _device->relativeInterfaceMid,
+                                                _device->sol,
+                                                _device->solDx,
+                                                _device->limiter,
+                                                _device->flux,
+                                                static_cast<int>( BOUNDARY_TYPE::NEUMANN ) );
+    CheckCuda( cudaGetLastError(), "FluxOrder2Kernel launch" );
 }
 
-void SNSolverHPC::FluxOrder1() {
+void SNSolverHPCCUDA::FluxOrder1() {
+    CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
+    const unsigned long nCellSys = _nCells * _localNSys;
+    const dim3 threads( CUDA_BLOCK_SIZE );
+    const dim3 gridCellSys( static_cast<unsigned>( ( nCellSys + CUDA_BLOCK_SIZE - 1 ) / CUDA_BLOCK_SIZE ) );
 
-#pragma omp parallel for
-    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
-
-#pragma omp simd
-        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-            _flux[Idx2D( idx_cell, idx_sys, _localNSys )] = 0.0;    // Reset temporary variable
-        }
-
-        // Fluxes
-        for( unsigned long idx_nbr = 0; idx_nbr < _nNbr; ++idx_nbr ) {
-            if( _cellBoundaryTypes[idx_cell] == BOUNDARY_TYPE::NEUMANN && _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )] == _nCells ) {
-#pragma omp simd
-                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-                    double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
-                                        _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-                    if( localInner > 0 ) {
-                        _flux[Idx2D( idx_cell, idx_sys, _localNSys )] += localInner * _sol[Idx2D( idx_cell, idx_sys, _localNSys )];
-                    }
-                    else {
-                        double ghostCellValue = _ghostCells[idx_cell][idx_sys];    // fixed boundary
-                        _flux[Idx2D( idx_cell, idx_sys, _localNSys )] += localInner * ghostCellValue;
-                    }
-                }
-            }
-            else {
-                unsigned long nbr_glob = _neighbors[Idx2D( idx_cell, idx_nbr, _nNbr )];    // global idx of neighbor cell
-#pragma omp simd
-                for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-
-                    double localInner = _quadPts[Idx2D( idx_sys, 0, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 0, _nNbr, _nDim )] +
-                                        _quadPts[Idx2D( idx_sys, 1, _nDim )] * _normals[Idx3D( idx_cell, idx_nbr, 1, _nNbr, _nDim )];
-
-                    _flux[Idx2D( idx_cell, idx_sys, _localNSys )] += ( localInner > 0 ) ? localInner * _sol[Idx2D( idx_cell, idx_sys, _localNSys )]
-                                                                                        : localInner * _sol[Idx2D( nbr_glob, idx_sys, _localNSys )];
-                }
-            }
-        }
-    }
+    FluxOrder1Kernel<<<gridCellSys, threads>>>( _nCells,
+                                                _localNSys,
+                                                _nNbr,
+                                                _nDim,
+                                                _device->quadPts,
+                                                _device->normals,
+                                                _device->neighbors,
+                                                _device->boundaryTypes,
+                                                _device->ghostCellValues,
+                                                _device->sol,
+                                                _device->flux,
+                                                static_cast<int>( BOUNDARY_TYPE::NEUMANN ) );
+    CheckCuda( cudaGetLastError(), "FluxOrder1Kernel launch" );
 }
 
-void SNSolverHPC::FVMUpdate() {
-    std::vector<double> temp_scalarFlux( _nCells );    // for MPI allreduce
+void SNSolverHPCCUDA::FVMUpdate() {
+    CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
 
-#pragma omp parallel for
-    for( unsigned long idx_cell = 0; idx_cell < _nCells; ++idx_cell ) {
+    const dim3 threads( CUDA_BLOCK_SIZE );
+    const dim3 gridCells( static_cast<unsigned>( ( _nCells + CUDA_BLOCK_SIZE - 1 ) / CUDA_BLOCK_SIZE ) );
+    const double invTwoPi = 1.0 / static_cast<double>( 2.0L * PI );
 
-#pragma omp simd
-        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-            // Update
-            _sol[Idx2D( idx_cell, idx_sys, _localNSys )] =
-                ( 1 - _dT * _sigmaT[idx_cell] ) * _sol[Idx2D( idx_cell, idx_sys, _localNSys )] -
-                _dT / _areas[idx_cell] * _flux[Idx2D( idx_cell, idx_sys, _localNSys )] +
-                _dT * ( _sigmaS[idx_cell] * _scalarFlux[idx_cell] / ( 2 * M_PI ) + _source[Idx2D( idx_cell, idx_sys, _localNSys )] );
-        }
-        double localScalarFlux = 0;
+    FVMUpdateKernel<<<gridCells, threads>>>( _nCells,
+                                             _localNSys,
+                                             _dT,
+                                             _device->sigmaS,
+                                             _device->sigmaT,
+                                             _device->source,
+                                             _device->areas,
+                                             _device->quadWeights,
+                                             _device->flux,
+                                             _device->sol,
+                                             _device->scalarFlux,
+                                             invTwoPi );
+    CheckCuda( cudaGetLastError(), "FVMUpdateKernel launch" );
+    CheckCuda( cudaMemcpy( _scalarFlux.data(),
+                           _device->scalarFlux,
+                           static_cast<std::size_t>( _nCells ) * sizeof( double ),
+                           cudaMemcpyDeviceToHost ),
+               "download scalar flux in FVMUpdate" );
 
-#pragma omp simd reduction( + : localScalarFlux )
-        for( unsigned long idx_sys = 0; idx_sys < _localNSys; idx_sys++ ) {
-            _sol[Idx2D( idx_cell, idx_sys, _localNSys )] = std::max( _sol[Idx2D( idx_cell, idx_sys, _localNSys )], 0.0 );
-            localScalarFlux += _sol[Idx2D( idx_cell, idx_sys, _localNSys )] * _quadWeights[idx_sys];
-        }
-        temp_scalarFlux[idx_cell] = localScalarFlux;    // set flux
-    }
-// MPI Allreduce: _scalarFlux
 #ifdef IMPORT_MPI
+    std::vector<double> tempScalarFlux( _scalarFlux );
     MPI_Barrier( MPI_COMM_WORLD );
-    MPI_Allreduce( temp_scalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+    MPI_Allreduce( tempScalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     MPI_Barrier( MPI_COMM_WORLD );
-#endif
-#ifndef IMPORT_MPI
-    _scalarFlux = temp_scalarFlux;
+    CheckCuda(
+        cudaMemcpy( _device->scalarFlux, _scalarFlux.data(), static_cast<std::size_t>( _nCells ) * sizeof( double ), cudaMemcpyHostToDevice ),
+        "sync allreduced scalar flux to device" );
 #endif
 }
 
-void SNSolverHPC::IterPostprocessing() {
+void SNSolverHPCCUDA::IterPostprocessing() {
     // ALREDUCE NEEDED
     _mass    = 0.0;
     _rmsFlux = 0.0;
@@ -838,7 +1209,7 @@ void SNSolverHPC::IterPostprocessing() {
     }
 }
 
-bool SNSolverHPC::IsAbsorptionLattice( double x, double y ) const {
+bool SNSolverHPCCUDA::IsAbsorptionLattice( double x, double y ) const {
     // Check whether pos is inside absorbing squares
     double xy_corrector = -3.5;
     std::vector<double> lbounds{ 1 + xy_corrector, 2 + xy_corrector, 3 + xy_corrector, 4 + xy_corrector, 5 + xy_corrector };
@@ -855,7 +1226,7 @@ bool SNSolverHPC::IsAbsorptionLattice( double x, double y ) const {
 }
 
 // --- Helper ---
-double SNSolverHPC::ComputeTimeStep( double cfl ) const {
+double SNSolverHPCCUDA::ComputeTimeStep( double cfl ) const {
     // for pseudo 1D, set timestep to dx
     double dx, dy;
     switch( _settings->GetProblemName() ) {
@@ -894,7 +1265,7 @@ double SNSolverHPC::ComputeTimeStep( double cfl ) const {
 }
 
 // --- IO ----
-void SNSolverHPC::PrepareScreenOutput() {
+void SNSolverHPCCUDA::PrepareScreenOutput() {
     unsigned nFields = (unsigned)_settings->GetNScreenOutput();
 
     _screenOutputFieldNames.resize( nFields );
@@ -944,7 +1315,7 @@ void SNSolverHPC::PrepareScreenOutput() {
     }
 }
 
-void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
+void SNSolverHPCCUDA::WriteScalarOutput( unsigned idx_iter ) {
     unsigned n_probes = 4;
 
     unsigned nFields                  = (unsigned)_settings->GetNScreenOutput();
@@ -1074,7 +1445,7 @@ void SNSolverHPC::WriteScalarOutput( unsigned idx_iter ) {
     }
 }
 
-void SNSolverHPC::PrintScreenOutput( unsigned idx_iter ) {
+void SNSolverHPCCUDA::PrintScreenOutput( unsigned idx_iter ) {
     auto log = spdlog::get( "event" );
 
     unsigned strLen  = 15;    // max width of one column
@@ -1141,7 +1512,7 @@ void SNSolverHPC::PrintScreenOutput( unsigned idx_iter ) {
     }
 }
 
-void SNSolverHPC::PrepareHistoryOutput() {
+void SNSolverHPCCUDA::PrepareHistoryOutput() {
     unsigned n_probes = 4;
 
     unsigned nFields = (unsigned)_settings->GetNHistoryOutput();
@@ -1207,7 +1578,7 @@ void SNSolverHPC::PrepareHistoryOutput() {
     }
 }
 
-void SNSolverHPC::PrintHistoryOutput( unsigned idx_iter ) {
+void SNSolverHPCCUDA::PrintHistoryOutput( unsigned idx_iter ) {
 
     auto log = spdlog::get( "tabular" );
 
@@ -1234,7 +1605,7 @@ void SNSolverHPC::PrintHistoryOutput( unsigned idx_iter ) {
     }
 }
 
-void SNSolverHPC::DrawPreSolverOutput() {
+void SNSolverHPCCUDA::DrawPreSolverOutput() {
 
     // Logger
     auto log    = spdlog::get( "event" );
@@ -1278,7 +1649,7 @@ void SNSolverHPC::DrawPreSolverOutput() {
     logCSV->info( lineToPrintCSV );
 }
 
-void SNSolverHPC::DrawPostSolverOutput() {
+void SNSolverHPCCUDA::DrawPostSolverOutput() {
 
     // Logger
     auto log = spdlog::get( "event" );
@@ -1310,13 +1681,13 @@ void SNSolverHPC::DrawPostSolverOutput() {
     log->info( "--------------------------- Solver Finished ----------------------------" );
 }
 
-unsigned long SNSolverHPC::Idx2D( unsigned long idx1, unsigned long idx2, unsigned long len2 ) { return idx1 * len2 + idx2; }
+unsigned long SNSolverHPCCUDA::Idx2D( unsigned long idx1, unsigned long idx2, unsigned long len2 ) { return idx1 * len2 + idx2; }
 
-unsigned long SNSolverHPC::Idx3D( unsigned long idx1, unsigned long idx2, unsigned long idx3, unsigned long len2, unsigned long len3 ) {
+unsigned long SNSolverHPCCUDA::Idx3D( unsigned long idx1, unsigned long idx2, unsigned long idx3, unsigned long len2, unsigned long len3 ) {
     return ( idx1 * len2 + idx2 ) * len3 + idx3;
 }
 
-void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
+void SNSolverHPCCUDA::WriteVolumeOutput( unsigned idx_iter ) {
     unsigned nGroups = (unsigned)_settings->GetNVolumeOutput();
     if( ( _settings->GetVolumeOutputFrequency() != 0 && idx_iter % (unsigned)_settings->GetVolumeOutputFrequency() == 0 ) ||
         ( idx_iter == _nIter - 1 ) /* need sol at last iteration */ ) {
@@ -1355,7 +1726,7 @@ void SNSolverHPC::WriteVolumeOutput( unsigned idx_iter ) {
     }
 }
 
-void SNSolverHPC::PrintVolumeOutput( int idx_iter ) {
+void SNSolverHPCCUDA::PrintVolumeOutput( int idx_iter ) {
     if( _settings->GetSaveRestartSolutionFrequency() != 0 && idx_iter % (int)_settings->GetSaveRestartSolutionFrequency() == 0 ) {
         // std::cout << "Saving restart solution at iteration " << idx_iter << std::endl;
         WriteRestartSolution( _settings->GetOutputFile(),
@@ -1383,7 +1754,7 @@ void SNSolverHPC::PrintVolumeOutput( int idx_iter ) {
     }
 }
 
-void SNSolverHPC::PrepareVolumeOutput() {
+void SNSolverHPCCUDA::PrepareVolumeOutput() {
     unsigned nGroups = (unsigned)_settings->GetNVolumeOutput();
 
     _outputFieldNames.resize( nGroups );
@@ -1419,7 +1790,7 @@ void SNSolverHPC::PrepareVolumeOutput() {
     }
 }
 
-void SNSolverHPC::SetGhostCells() {
+void SNSolverHPCCUDA::SetGhostCells() {
     if( _settings->GetProblemName() == PROBLEM_Lattice ) {
         // #pragma omp parallel for
         for( unsigned idx_cell = 0; idx_cell < _nCells; idx_cell++ ) {
@@ -1475,7 +1846,7 @@ void SNSolverHPC::SetGhostCells() {
     }
 }
 
-void SNSolverHPC::SetProbingCellsLineGreen() {
+void SNSolverHPCCUDA::SetProbingCellsLineGreen() {
 
     if( _settings->GetProblemName() == PROBLEM_SymmetricHohlraum ) {
         assert( _nProbingCellsLineGreen % 2 == 0 );
@@ -1602,7 +1973,7 @@ void SNSolverHPC::SetProbingCellsLineGreen() {
     }
 }
 
-void SNSolverHPC::ComputeQOIsGreenProbingLine() {
+void SNSolverHPCCUDA::ComputeQOIsGreenProbingLine() {
 #pragma omp parallel for
     for( unsigned i = 0; i < _nProbingCellsLineGreen; i++ ) {    // Loop over probing cells
         _absorptionValsLineSegment[i] =
@@ -1622,7 +1993,7 @@ void SNSolverHPC::ComputeQOIsGreenProbingLine() {
     // std::cout << _absorptionValsLineSegment[1] << std::endl;
 }
 
-std::vector<unsigned> SNSolverHPC::linspace2D( const std::vector<double>& start, const std::vector<double>& end, unsigned num_points ) {
+std::vector<unsigned> SNSolverHPCCUDA::linspace2D( const std::vector<double>& start, const std::vector<double>& end, unsigned num_points ) {
     /**
      * Generate a 2D linspace based on the start and end points with a specified number of points.
      *
@@ -1649,7 +2020,7 @@ std::vector<unsigned> SNSolverHPC::linspace2D( const std::vector<double>& start,
     return result;
 }
 
-void SNSolverHPC::ComputeCellsPerimeterLattice() {
+void SNSolverHPCCUDA::ComputeCellsPerimeterLattice() {
     double l_1    = 1.5;    // perimeter 1
     double l_2    = 2.5;    // perimeter 2
     auto nodes    = _mesh->GetNodes();

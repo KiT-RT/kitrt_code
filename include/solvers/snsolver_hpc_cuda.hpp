@@ -1,5 +1,5 @@
-#ifndef SNSOLVERHPC_H
-#define SNSOLVERHPC_H
+#ifndef SNSOLVERHPCCUDA_H
+#define SNSOLVERHPCCUDA_H
 
 // include Matrix, Vector definitions
 #include "common/globalconstants.hpp"
@@ -14,10 +14,12 @@ class Mesh;
 class ProblemBase;
 
 /*! @brief Base class for all solvers. */
-class SNSolverHPC
+class SNSolverHPCCUDA
 {
 
   private:
+    struct DeviceBuffers;
+
     int _rank;
     int _numProcs;
     unsigned long _localNSys;
@@ -149,6 +151,13 @@ class SNSolverHPC
     std::vector<double> _historyOutputFields;          /*!< @brief Solver Output: dimensions (FieldID). */
     std::vector<std::string> _historyOutputFieldNames; /*!< @brief Names of the outputFields: dimensions (FieldID) */
 
+    // CUDA backend (single GPU for first version)
+    bool _cudaInitialized;
+    int _cudaDeviceId;
+    DeviceBuffers* _device;
+    std::vector<int> _cellBoundaryTypesInt;
+    std::vector<double> _ghostCellValues;
+
     // ---- Member functions ----
 
     // Solver
@@ -214,12 +223,18 @@ class SNSolverHPC
     void ComputeQOIsGreenProbingLine();
     std::vector<unsigned> linspace2D( const std::vector<double>& start, const std::vector<double>& end, unsigned num_points );
 
+    void InitCUDA();
+    void UploadStaticDataToDevice();
+    void UploadStateToDevice();
+    void DownloadStateFromDevice();
+    void FreeCUDA();
+
   public:
     /*! @brief Solver constructor
      *  @param settings config class that stores all needed config information */
-    SNSolverHPC( Config* settings );
+    SNSolverHPCCUDA( Config* settings );
 
-    ~SNSolverHPC();
+    ~SNSolverHPCCUDA();
 
     /*! @brief Solve functions runs main iteration loop. Components of the solve
      * loop are pure  and subclassed by the child solvers.  */
@@ -228,4 +243,4 @@ class SNSolverHPC
     /*! @brief Save Output solution to VTK file */
     void PrintVolumeOutput() const {};    // Only for debugging purposes.
 };
-#endif    // SNSOLVERHPC_H
+#endif    // SNSOLVERHPCCUDA_H
