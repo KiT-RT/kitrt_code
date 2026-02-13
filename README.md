@@ -142,7 +142,7 @@ singularity exec tools/singularity/kit_rt_MPI.sif \
   mpirun -np 4 ./build_singularity_mpi/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cpu_order2.cfg
 ```
 
-### 3. CPU + single GPU (OpenMP + CUDA)
+### 3. CPU + CUDA (single or multi-GPU via MPI)
 
 #### 3a) Singularity installation
 ```bash
@@ -152,11 +152,11 @@ cd ../..
 mkdir -p build_singularity_cuda
 cd build_singularity_cuda
 singularity exec --nv ../tools/singularity/kit_rt_MPI_cuda.sif \
-  cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=ON -DBUILD_ML=OFF ..
+  cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=ON -DBUILD_ML=OFF ..
 singularity exec --nv ../tools/singularity/kit_rt_MPI_cuda.sif make -j
 cd ..
 singularity exec --nv tools/singularity/kit_rt_MPI_cuda.sif \
-  ./build_singularity_cuda/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cuda_order2.cfg
+  mpirun -np 2 ./build_singularity_cuda/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cuda_order2.cfg
 ```
 
 When compiled with `-DBUILD_CUDA_HPC=ON`, HPC runs use the CUDA backend if a GPU is visible, and fall back to CPU if no GPU is detected.

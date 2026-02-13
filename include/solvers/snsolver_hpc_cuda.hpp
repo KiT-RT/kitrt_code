@@ -151,7 +151,7 @@ class SNSolverHPCCUDA
     std::vector<double> _historyOutputFields;          /*!< @brief Solver Output: dimensions (FieldID). */
     std::vector<std::string> _historyOutputFieldNames; /*!< @brief Names of the outputFields: dimensions (FieldID) */
 
-    // CUDA backend (single GPU for first version)
+    // CUDA backend state
     bool _cudaInitialized;
     int _cudaDeviceId;
     DeviceBuffers* _device;
