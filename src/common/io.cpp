@@ -51,11 +51,9 @@ void ExportVTK( const std::string fileName,
                 const std::vector<std::vector<std::vector<double>>>& outputFields,
                 const std::vector<std::vector<std::string>>& outputFieldNames,
                 const Mesh* mesh ) {
-    int rank   = 0;
-    int nprocs = 1;
+    int rank = 0;
 #ifdef IMPORT_MPI
     // Initialize MPI
-    MPI_Comm_size( MPI_COMM_WORLD, &nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 #endif
     if( rank == 0 ) {
@@ -152,7 +150,8 @@ void ExportVTK( const std::string fileName,
 Mesh* LoadSU2MeshFromFile( const Config* settings ) {
     auto log = spdlog::get( "event" );
     // log->info( "| Importing mesh. This may take a while for large meshes." );
-    unsigned dim;
+    unsigned dim = settings->GetDim();
+    bool foundDim = false;
     std::vector<Vector> nodes;
     std::vector<std::vector<unsigned>> cells;
     std::vector<std::pair<BOUNDARY_TYPE, std::vector<unsigned>>> boundaries;
@@ -166,11 +165,15 @@ Mesh* LoadSU2MeshFromFile( const Config* settings ) {
         while( getline( ifs, line ) ) {
             if( line.find( "NDIME", 0 ) != std::string::npos ) {
                 dim = static_cast<unsigned>( TextProcessingToolbox::GetTrailingNumber( line ) );
+                foundDim = true;
                 // if( settings->GetDim() != dim ) {
                 //     log->info( "Warning: Mesh dimension does not coinside with problem dimension! Proceed with caution!" );
                 // }
                 break;
             }
+        }
+        if( !foundDim ) {
+            ErrorMessages::Error( "Invalid mesh file detected! Missing NDIME entry.", CURRENT_FUNCTION );
         }
         ifs.clear();
         ifs.seekg( 0, std::ios::beg );

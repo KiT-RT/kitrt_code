@@ -29,7 +29,7 @@ MNSolverNormalized::MNSolverNormalized( Config* settings ) : MNSolver( settings 
     _sol2 = VectorVector( _nCells, Vector( _nSystem, 0.0 ) );
 }
 
-MNSolverNormalized::~MNSolverNormalized() {}
+MNSolverNormalized::~MNSolverNormalized() { delete _optimizer2; }
 
 void MNSolverNormalized::IterPreprocessing( unsigned /*idx_pseudotime*/ ) {
     Vector alpha_norm_per_cell( _nCells, 0 );    // ONLY FOR DEBUGGING! THIS SLOWS DOWN THE CODE

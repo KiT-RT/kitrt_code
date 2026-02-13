@@ -1,6 +1,7 @@
 #ifndef MLOPTIMIZER_H
 #define MLOPTIMIZER_H
 
+#include <memory>
 #include "optimizerbase.hpp"
 
 #ifdef BUILD_ML
@@ -31,7 +32,7 @@ class NeuralNetworkOptimizer : public OptimizerBase
     Vector _weights;                                               /*!<  @brief quadrature weights, dim(_weights) = (_nq) */
 
     std::string _tfModelInputName;               /*!< @brief Name of the tf model input */
-    cppflow::model* _tfModel;                    /*!< @brief wrapper object for the compiled tensorflow model*/
+    std::unique_ptr<cppflow::model> _tfModel;    /*!< @brief wrapper object for the compiled tensorflow model*/
     cppflow::tensor _modelInput;                 /*!< @brief model input tensor. dims: _nCellsx_nSys*/
     std::vector<float> _modelServingVectorU;     /*!< @brief model input as a 1D vector. dims: _nCells*(_nSys-1) */
     std::vector<float> _modelServingVectorAlpha; /*!< @brief model output as a 1D vector. dims: _nCells*_nSys */
@@ -71,15 +72,15 @@ class NeuralNetworkOptimizer : public OptimizerBase
 
     inline ~NeuralNetworkOptimizer();
 
-    inline void Solve( Vector& alpha, const Vector& u, const VectorVector& moments, unsigned idx_cell = 0 ) override{};
+    inline void Solve( Vector&, const Vector&, const VectorVector&, unsigned = 0 ) override{};
 
-    inline void SolveMultiCell( VectorVector& alpha, const VectorVector& u, const VectorVector& moments, Vector& alpha_norms ) override{};
+    inline void SolveMultiCell( VectorVector&, const VectorVector&, const VectorVector&, Vector& ) override{};
 
     /*! @brief Reconstruct the moment sol from the Lagrange multiplier alpha
      *  @param sol moment vector
      *  @param alpha Lagrange multipliers
      *  @param moments Moment basis      */
-    inline void ReconstructMoments( Vector& sol, const Vector& alpha, const VectorVector& moments ) override{};
+    inline void ReconstructMoments( Vector&, const Vector&, const VectorVector& ) override{};
 };
 #endif
 #endif    // MLOPTIMIZER_H
