@@ -9,7 +9,7 @@ option( BUILD_UNITY "enables unity build for faster compile times" ON )
 option( BUILD_CODE_COV "enables compiler option required for code coverage analysis" OFF )
 option( BUILD_ML "enables build with tensorflow backend access" OFF )
 option( BUILD_MPI "enables build with MPI access" OFF )
-option( BUILD_CUDA_HPC "enables CUDA backend for SN HPC solver (single GPU)" OFF )
+option( BUILD_CUDA_HPC "enables CUDA backend for SN HPC solver (MPI rank to GPU mapping)" OFF )
 #################################################
 
 

@@ -369,21 +369,14 @@ SNSolverHPCCUDA::SNSolverHPCCUDA( Config* settings ) {
         ErrorMessages::Error( "The number of processors must be less than or equal to the number of quadrature points.", CURRENT_FUNCTION );
     }
 
-    if( _numProcs == 1 ) {
-        _localNSys   = _nSys;
-        _startSysIdx = 0;
-        _endSysIdx   = _nSys;
-    }
-    else {
-        _localNSys   = _nSys / ( _numProcs - 1 );
-        _startSysIdx = _rank * _localNSys;
-        _endSysIdx   = _rank * _localNSys + _localNSys;
+    const unsigned long numRanks  = static_cast<unsigned long>( _numProcs );
+    const unsigned long rankIndex = static_cast<unsigned long>( _rank );
+    const unsigned long baseChunk = _nSys / numRanks;
+    const unsigned long remainder = _nSys % numRanks;
 
-        if( _rank == _numProcs - 1 ) {
-            _localNSys = _nSys - _startSysIdx;
-            _endSysIdx = _nSys;
-        }
-    }
+    _localNSys   = baseChunk + ( rankIndex < remainder ? 1UL : 0UL );
+    _startSysIdx = rankIndex * baseChunk + std::min( rankIndex, remainder );
+    _endSysIdx   = _startSysIdx + _localNSys;
 
     // std::cout << "Rank: " << _rank << " startSysIdx: " << _startSysIdx << " endSysIdx: " << _endSysIdx <<  " localNSys: " << _localNSys <<
     // std::endl;
@@ -613,8 +606,28 @@ void SNSolverHPCCUDA::InitCUDA() {
         ErrorMessages::Error( "No CUDA-capable GPU detected, but SNSolverHPCCUDA was requested.", CURRENT_FUNCTION );
     }
 
-    _cudaDeviceId = 0;    // first version: pin to one GPU
+    int localRank = 0;
+    int localSize = 1;
+#ifdef IMPORT_MPI
+    MPI_Comm localComm = MPI_COMM_NULL;
+    MPI_Comm_split_type( MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, _rank, MPI_INFO_NULL, &localComm );
+    MPI_Comm_rank( localComm, &localRank );
+    MPI_Comm_size( localComm, &localSize );
+    MPI_Comm_free( &localComm );
+#endif
+
+    _cudaDeviceId = localRank % nDevices;
     CheckCuda( cudaSetDevice( _cudaDeviceId ), "cudaSetDevice" );
+
+    if( _rank == 0 ) {
+        auto log = spdlog::get( "event" );
+        if( log ) {
+            log->info( "| CUDA backend: {} local MPI rank(s), {} visible CUDA device(s).", localSize, nDevices );
+            if( localSize > nDevices ) {
+                log->warn( "| CUDA backend: {} local MPI rank(s) exceed {} visible device(s); GPUs will be shared.", localSize, nDevices );
+            }
+        }
+    }
 
     _device = new DeviceBuffers();
 
@@ -805,6 +818,20 @@ void SNSolverHPCCUDA::Solve() {
             RK2AverageAndScalarFluxKernel<<<gridCells, threads>>>(
                 _nCells, _localNSys, _device->quadWeights, _device->solRK0, _device->sol, _device->scalarFlux );
             CheckCuda( cudaGetLastError(), "RK2AverageAndScalarFluxKernel launch" );
+#ifdef IMPORT_MPI
+            CheckCuda( cudaMemcpy( _scalarFlux.data(),
+                                   _device->scalarFlux,
+                                   static_cast<std::size_t>( _nCells ) * sizeof( double ),
+                                   cudaMemcpyDeviceToHost ),
+                       "download scalar flux after RK2 average" );
+            std::vector<double> tempScalarFlux( _scalarFlux );
+            MPI_Barrier( MPI_COMM_WORLD );
+            MPI_Allreduce( tempScalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
+            MPI_Barrier( MPI_COMM_WORLD );
+            CheckCuda(
+                cudaMemcpy( _device->scalarFlux, _scalarFlux.data(), static_cast<std::size_t>( _nCells ) * sizeof( double ), cudaMemcpyHostToDevice ),
+                "sync allreduced scalar flux after RK2 average" );
+#endif
         }
         else {
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
