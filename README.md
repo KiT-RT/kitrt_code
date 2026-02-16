@@ -204,14 +204,12 @@ gcovr -r .. --html-details coverage.html
 ## Python API
 
 The Python interface is provided via [charm_kit](https://github.com/KiT-RT/charm_kit), allowing seamless integration into AI and outer-loop (UQ, Optimization) workflows. 
-Check the corresponding readme for further info
+Check the corresponding readme for further info.
 
 
 
 
-## Scaling Studies
 
-Performance benchmarks and scaling plots can be found \[[here](https://doi.org/10.1145/3630001)].
 
 
 
