@@ -1,12 +1,12 @@
-AirCavity1D
-===========
+Hohlraum Family
+===============
 
-.. doxygenclass:: AirCavity1D
+.. doxygenclass:: Hohlraum
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: AirCavity1D_Moment
+.. doxygenclass:: Hohlraum_Moment
    :members:
    :protected-members:
    :private-members:

@@ -1,7 +1,12 @@
-DataGeneratorBase
-=============
+Data Generators 1D
+==================
 
-.. doxygenclass:: DataGeneratorBase
+.. doxygenclass:: DataGeneratorClassification1D
+   :members:
+   :protected-members:
+   :private-members:
+
+.. doxygenclass:: DataGeneratorRegression1D
    :members:
    :protected-members:
    :private-members:

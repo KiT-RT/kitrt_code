@@ -1,7 +1,7 @@
-DataGeneratorBase
-=============
+Data Generators 3D
+==================
 
-.. doxygenclass:: DataGeneratorBase
+.. doxygenclass:: DataGeneratorRegression3D
    :members:
    :protected-members:
    :private-members:

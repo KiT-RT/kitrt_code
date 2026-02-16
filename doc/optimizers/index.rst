@@ -5,5 +5,9 @@ Optimizers
    :maxdepth: 1
 
    optimizerbase
-   mloptimizer
    newtonoptimizer
+   regularizednewtonoptimizer
+   partregularizednewtonoptimizer
+   reducednewtonoptimizer
+   reducedpartregularizednewtonoptimizer
+   neuralnetworkoptimizer

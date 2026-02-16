@@ -15,3 +15,6 @@ Quadratures
    qlookupquadrature
    qmontecarlo
    qproduct
+   qmidpointtensorized
+   qrectangular
+   qsphericaltessalation

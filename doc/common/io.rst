@@ -1,8 +1,4 @@
 IO
-====
+==
 
-.. doxygenclass:: IO
-    :members:
-    :protected-members:
-    :private-members:
-
+.. doxygenfile:: io.hpp

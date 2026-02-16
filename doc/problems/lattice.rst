@@ -1,12 +1,12 @@
-AirCavity1D
-===========
+Lattice Family
+==============
 
-.. doxygenclass:: AirCavity1D
+.. doxygenclass:: Lattice_SN
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: AirCavity1D_Moment
+.. doxygenclass:: Lattice_Moment
    :members:
    :protected-members:
    :private-members:

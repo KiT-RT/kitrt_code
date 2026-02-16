@@ -1,87 +1,96 @@
 .. _installation:
 
 Installation
-------------------------
-*****
-Build
-*****
+============
 
-Required dependencies
-=====================
- - Compiler with C++17 support
- - cmake >= v3.12.4
- - LAPACK
- - OpenMP
- - MPI
- - VTK
- - git
- - ninja or make
+Requirements
+------------
 
-Obtain submodules
-==================
-Note that an **active internet connection is required for the first build** in order to download the latest versions of the required submodules!
-For the first build only, download all submodules:
+Required:
 
-.. code-block:: bash 
+- C++17 compiler
+- CMake 3.16+
+- OpenMP
+- LAPACK (and optionally BLAS)
+- VTK
+- Git
 
-        git submodule update --init --recursive
+Optional features:
 
-Compile the code
-================
-**Make** build system (available on most systems)
- 
- 
-.. code-block:: bash 
+- MPI (`-DBUILD_MPI=ON`)
+- CUDA backend for the HPC SN solver (`-DBUILD_CUDA_HPC=ON`)
+- TensorFlow backend for neural closure (`-DBUILD_ML=ON`)
 
-       cd code/build/release
-       cmake -DCMAKE_BUILD_TYPE=Release ../../
-       make 
-
-If building in parallel is desired, change the last line to `make -jN`, where `N` optimally is equal to the number of available threads+1.
-
-**Ninja** build system:
+Get the source and submodules
+-----------------------------
 
 .. code-block:: bash
- 
-      cd code/build/release
-      cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ../../
-      ninja
 
+   git clone https://github.com/KiT-RT/kitrt_code.git
+   cd kitrt_code
+   git submodule update --init --recursive
 
+Build examples
+--------------
 
-The resulting executable will automatically be placed in the `code/bin` folder.
+Run all commands from the repository root.
 
-----------------------------------------------------------
+CPU/OpenMP build (no MPI, no CUDA, no ML):
 
-**********
+.. code-block:: bash
+
+   mkdir -p build_omp
+   cmake -S . -B build_omp -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF
+   cmake --build build_omp -j
+
+MPI/OpenMP build for HPC SN:
+
+.. code-block:: bash
+
+   mkdir -p build_mpi
+   cmake -S . -B build_mpi -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF
+   cmake --build build_mpi -j
+
+MPI + CUDA build for HPC SN CUDA backend:
+
+.. code-block:: bash
+
+   mkdir -p build_cuda
+   cmake -S . -B build_cuda -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=ON -DBUILD_ML=OFF
+   cmake --build build_cuda -j
+
+Build with tests:
+
+.. code-block:: bash
+
+   mkdir -p build_test
+   cmake -S . -B build_test -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+   cmake --build build_test -j
+
 Run
-**********
+---
 
-Execute the compiled binary from the `bin` folder and hand over a valid *TOML*-styled config file.
-Example from inside the `code` directory:
+The executable is produced inside the build directory (for example, `build_omp/KiT-RT`).
 
-```bash
-./KiT-RT ../input/example.cfg
-```
+Single-process run:
 
-In order to run the code in parallel execute:
+.. code-block:: bash
 
-```bash
-OMP_NUM_THREADS=N mpirun -np J ./KiT-RT ../input/example.cfg
-```
+   ./build_omp/KiT-RT tests/input/validation_tests/SN_solver/checkerboard_SN.cfg
 
-with `N` equal to the number of shared memory threads and `J` equal to the number of distrubuted memory threads.
+MPI run (HPC SN config):
 
----------------------------------------------------------------
+.. code-block:: bash
+
+   mpirun -np 4 ./build_mpi/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cpu_order2.cfg
+
+If `HPC_SOLVER = YES` and CUDA support is compiled in, KiT-RT uses the CUDA HPC
+solver when a GPU is available and falls back to CPU HPC otherwise.
 
 Tests
-============================
-
-After compiling the framework as described above just run:
+-----
 
 .. code-block:: bash
-        
-		make test
 
-
-The ``unit_tests`` executable will also be placed in in the build folder.
+   ./build_test/unit_tests
+   ctest --test-dir build_test --output-on-failure
