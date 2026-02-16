@@ -5,13 +5,12 @@ Solvers
    :maxdepth: 1
 
    solverbase
-   csdpnsolver
-   csdsnsolver
-   csdsnsolverfp
-   csdsnsolvernotrafo
-   csdsolvertrafofp
-   csdsolvertrafofp2d
-   csdsolvertrafofpsh2d
-   mnsolver
-   pnsolver
    snsolver
+   snsolver_hpc
+   snsolver_hpc_cuda
+   pnsolver
+   mnsolver
+   mnsolver_normalized
+   csdsnsolver
+   csdpnsolver
+   csdmnsolver

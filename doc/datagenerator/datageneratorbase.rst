@@ -1,5 +1,5 @@
 DataGeneratorBase
-=============
+=================
 
 .. doxygenclass:: DataGeneratorBase
    :members:

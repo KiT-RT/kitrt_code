@@ -1,7 +1,5 @@
 TextProcessingToolbox
-=============
+=====================
 
-.. doxygenclass:: TextProcessingToolbox
+.. doxygennamespace:: TextProcessingToolbox
    :members:
-   :protected-members:
-   :private-members:

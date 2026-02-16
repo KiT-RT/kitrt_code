@@ -9,6 +9,5 @@ Toolboxes
    textprocessingtoolbox
    pyhelper
    reconstructor
-   shpericalbase
-   sphericalmonomials
-   sphericalharmonics
+   epics
+   icru

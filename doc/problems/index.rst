@@ -6,16 +6,14 @@ Problems
 
    problembase
    aircavity1d
-   checkerboardpn
-   checkerboardsn
-   electronrt
-   icru
    linesource
-   linesourcepn
-   linesourcesn
-   linesourcesnpseudo1d
-   linesourcesnpseudo1dphysics
-   musclebonelung
-   phantom2d
-   slabgeohg
-   waterphantom
+   checkerboard
+   meltingcube
+   lattice
+   halflattice
+   hohlraum
+   symmetrichohlraum
+   quarterhohlraum
+   starmapvalidation
+   phantomimage
+   radiationctimage

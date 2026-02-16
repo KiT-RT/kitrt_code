@@ -1,12 +1,12 @@
-Data Generators 2D
+HalfLattice Family
 ==================
 
-.. doxygenclass:: DataGeneratorClassification2D
+.. doxygenclass:: HalfLattice_SN
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: DataGeneratorRegression2D
+.. doxygenclass:: HalfLattice_Moment
    :members:
    :protected-members:
    :private-members:
