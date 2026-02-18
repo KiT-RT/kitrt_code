@@ -7,8 +7,9 @@ C++ Documentation
 
 .. toctree::
    :maxdepth: 2
-   
+
    common/index
+   datagenerator/index
    entropies/index
    fluxes/index
    kernels/index

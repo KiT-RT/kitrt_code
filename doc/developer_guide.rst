@@ -1,49 +1,34 @@
-================
 Developer Guide
-================
+===============
 
+Coding style
+------------
 
-Coding Style
-==============
+Please follow the project naming conventions used throughout the codebase:
 
-Please stick to the following coding style for easier code readability:
-    - class variables start with an underscore and lowercase letters e.g. ``_foo``
-    - functions start with a capital letter e.g. ``GetSettings()``
-    - any variable/function names have capital letters at each individual word e.g. ``GetAllCellsAdjacentTo(Cell i)``
+- class members commonly use leading underscore (for example `_foo`)
+- methods use upper camel case (for example `GetSettings()`)
+- compound names use camel case (for example `GetAllCellsAdjacentTo`)
 
-Please also use the provided ``code/.clang-format`` style format to format your code before pushing your latest commits.
-Some editors offer to automatically apply the style format upon saving a file (e.g. ``Qtcreator``).
+Format code with the repository style file:
 
+- `.clang-format`
 
-Continuous Integration (CI)
-============================
+Build and test workflow
+-----------------------
 
-Every commit on the master branch will trigger a build test and unit tests.
-If either of the tests fail you will get an email, telling you the 'pipeline' has failed. If this happens, visit the 'CI/CD' tab and check what went wrong and try to fix the error as soon as possible.
-Creating a merge request from a branch into the master branch will (not tested yet) also trigger the tests and your merge will be rejected in case any test fails.
+A typical local developer workflow is:
 
-If you add additional libraries to the code, these also need to be added to the test environment, i.e. the respective docker container.
+.. code-block:: bash
 
-Little guide:
+   cmake -S . -B build_dev -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+   cmake --build build_dev -j
+   ./build_dev/unit_tests
+   ctest --test-dir build_dev --output-on-failure
 
-Test the library installation in the docker container
+CI
+--
 
-.. code-block:: bash 
-
-    docker run -it --rm rtsn/test:latest bash
-
-Note the steps required and add them to the `Dockerfile` in the `scripts` folder.
-Build the new container (takes some time)
-
-.. code-block:: bash 
-
-    cd docker build -t rtsn/test:latest .
-
-or commit your changes to the image (google that procedure).
-Push the new image to `hub.docker.com`
-
-.. code-block:: bash 
-     
-   docker push rtsn/test:latest
-
-This last step requires a preceeding `docker login`. Ask Jannick for login credentials.
+The repository uses GitHub Actions for build and test checks. Before opening a
+PR, run local builds/tests and verify that new dependencies are reflected in the
+build configuration and container setups used by CI.

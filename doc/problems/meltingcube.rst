@@ -1,27 +1,27 @@
-LineSource Family
-=================
+MeltingCube Family
+==================
 
-.. doxygenclass:: LineSource
+.. doxygenclass:: MeltingCube
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: LineSource_SN
+.. doxygenclass:: MeltingCube_SN
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: LineSource_Moment
+.. doxygenclass:: MeltingCube_Moment
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: LineSource_SN_1D
+.. doxygenclass:: MeltingCube_SN_1D
    :members:
    :protected-members:
    :private-members:
 
-.. doxygenclass:: LineSource_Moment_1D
+.. doxygenclass:: MeltingCube_Moment_1D
    :members:
    :protected-members:
    :private-members:

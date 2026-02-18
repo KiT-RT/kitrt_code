@@ -1,7 +1,7 @@
-DataGeneratorBase
-=============
+DataGeneratorClassification
+===========================
 
-.. doxygenclass:: DataGeneratorBase
+.. doxygenclass:: DataGeneratorClassification
    :members:
    :protected-members:
    :private-members:

@@ -1,96 +1,141 @@
 Configuration files
------------------------
+===================
 
-Configuration files are written in `TOML-style <https://github.com/toml-lang/toml>`_
-. A number of examples (link examples) can be found in the ``./code/input`` folder. Users can also handover their own files, which should follow the following specifications:
+KiT-RT uses a simple key-value format parsed by `Config` (see
+`src/common/config.cpp`). It is not strict TOML.
 
-********************
-Parameters
-********************
+Syntax
+------
 
-Below you can see the possible parameters that can be specified in a config file. Which of these parameters are required depends on the chosen application and solver
+- One option per line: `KEY = VALUE`
+- Lists use parentheses: `SCREEN_OUTPUT = (ITER, MASS, RMS_FLUX)`
+- Comments often use `%` in existing examples
+- Boolean values use `YES/NO`
+- Relative paths are resolved from the config file directory
 
+Minimal example
+---------------
 
+.. code-block:: cfg
 
-.. code-block:: c++
+   OUTPUT_DIR = ../../../result
+   OUTPUT_FILE = checkerboard_SN
+   LOG_DIR = ../../../result/logs
+   MESH_FILE = ../../mesh_files/checkerboard.su2
 
-    // --- Options ---
-    // File Structure
-    std::string _inputDir;     // Directory for input files
-    std::string _outputDir;    // Directory for output files
-    std::string _outputFile;   // Name of output file
-    std::string _logDir;       // Directory of log file
-    std::string _logFileName;  // Name of log file
-    std::string _meshFile;     // Name of mesh file
-    std::string _ctFile;       // Name of CT file
+   PROBLEM = CHECKERBOARD
+   SOLVER = SN_SOLVER
+   CFL_NUMBER = 0.5
+   TIME_FINAL = 0.4
 
-    // Quadrature
-    QUAD_NAME _quadName;       // Quadrature Name
-    unsigned short _quadOrder; // Quadrature Order
-    unsigned _nQuadPoints;
+   BC_DIRICHLET = ( void )
 
-    // Mesh
-    unsigned _nCells;
+   QUAD_TYPE = GAUSS_LEGENDRE_TENSORIZED_2D
+   QUAD_ORDER = 4
 
-    // Solver
-    double _CFL;                     // CFL Number for Solver
-    double _tEnd;                    // Final Time for Simulation 
-    PROBLEM_NAME _problemName;       // Name of predefined Problem   
-    SOLVER_NAME _solverName;         // Name of the used Solver 
-    ENTROPY_NAME _entropyName;       // Name of the used Entropy Functional 
-    unsigned short _maxMomentDegree; // Maximal Order of Moments for PN and MN Solver 
-    unsigned short _reconsOrder;     // Spatial Order of Accuracy for Solver 
+   VOLUME_OUTPUT = (MINIMAL)
 
-    // Linesource
-    double _sigmaS; // Scattering coeffient for Linesource test case 
+Core options
+------------
 
-    /*If true, very low entries (10^-10 or smaller) of the flux matrices will be set to zero,
-     * to improve floating point accuracy */
-    bool _cleanFluxMat;
+File and paths:
 
-    /*If true, the SN Solver uses all Gauss pts in the quadrature */
-    bool _allGaussPts; 
-    
-    /*If true, continuous slowing down approximation will be used */
-    bool _csd;                 
+- `OUTPUT_DIR`, `OUTPUT_FILE`, `LOG_DIR`, `LOG_FILE`
+- `MESH_FILE`, `CT_FILE`, `DATA_DIR`
+- `LOAD_RESTART_SOLUTION`, `SAVE_RESTART_SOLUTION_FREQUENCY`
 
-    std::string _hydrogenFile; // Name of hydrogen cross section file 
-    std::string _oxygenFile;   // Name of oxygen cross section file 
+Solver setup:
 
-    // Boundary Conditions
-    /*List of all Pairs (marker, BOUNDARY_TYPE), e.g. (farfield,DIRICHLET).
-     *Each Boundary Conditions must have an entry in enum BOUNDARY_TYPE*/
-    std::vector<std::pair<std::string, BOUNDARY_TYPE>> _boundaries;
+- `SOLVER`, `PROBLEM`, `HPC_SOLVER`
+- `CFL_NUMBER`, `TIME_FINAL`, `RECONS_ORDER`, `TIME_INTEGRATION_ORDER`
+- `MAX_MOMENT_SOLVER`, `SPATIAL_DIM`, `SN_ALL_GAUSS_PTS`
 
-    unsigned short _nMarkerDirichlet;          // Number of Dirichlet BC markers. Enum entry: DIRICHLET 
-    unsigned short _nMarkerNeumann;            // Number of Neumann BC markers. Enum entry: Neumann 
-    std::vector<std::string> _MarkerDirichlet; // Dirichlet BC markers. 
-    std::vector<std::string> _MarkerNeumann;   // Neumann BC markers. 
+Physics and closures:
 
-    // Scattering Kernel
-    KERNEL_NAME _kernelName; // Scattering Kernel Name
+- `KERNEL`, `SPHERICAL_BASIS`
+- `ENTROPY_FUNCTIONAL`, `ENTROPY_OPTIMIZER`
+- `REGULARIZER_GAMMA`, `NEWTON_*`, `NEURAL_MODEL_*`
 
-    // Optimizer
-    OPTIMIZER_NAME _entropyOptimizerName; // Choice of optimizer 
-    double _optimizerEpsilon;             // termination criterion epsilon for Newton Optmizer 
-    unsigned short _newtonIter;           // Maximal Number of newton iterations 
-    double _newtonStepSize;               // Stepsize factor for newton optimizer 
-    unsigned short _newtonLineSearchIter; // Maximal Number of line search iterations for newton optimizer 
-    bool _newtonFastMode;                 // If true, we skip the NewtonOptimizer for quadratic entropy and assign alpha = u 
+Boundary and quadrature:
 
-    // Output Options
-    unsigned short _nVolumeOutput;            // Number of volume outputs 
-    std::vector<VOLUME_OUTPUT> _volumeOutput; // Output groups for volume output
-    unsigned short _volumeOutputFrequency;    // Frequency of vtk write of volume output
+- `BC_DIRICHLET`, `BC_NEUMANN`
+- `QUAD_TYPE`, `QUAD_ORDER`
 
-    unsigned short _nScreenOutput;            // Number of screen outputs 
-    std::vector<SCALAR_OUTPUT> _screenOutput; // Output groups for screen output
-    unsigned short _screenOutputFrequency;    // Frequency of screen output
+Output control:
 
-    unsigned short _nHistoryOutput;            // Number of screen outputs 
-    std::vector<SCALAR_OUTPUT> _historyOutput; // Output groups for screen output
-    unsigned short _historyOutputFrequency;    // Frequency of screen output
+- `VOLUME_OUTPUT`, `VOLUME_OUTPUT_FREQUENCY`
+- `SCREEN_OUTPUT`, `SCREEN_OUTPUT_FREQUENCY`
+- `HISTORY_OUTPUT`, `HISTORY_OUTPUT_FREQUENCY`
 
+Current enum values (from code)
+--------------------------------
 
+`SOLVER`:
 
+- `SN_SOLVER`
+- `PN_SOLVER`
+- `MN_SOLVER`
+- `MN_SOLVER_NORMALIZED`
+- `CSD_SN_SOLVER`
+- `CSD_PN`
+- `CSD_MN`
 
+`PROBLEM`:
+
+- `LINESOURCE`, `LINESOURCE_1D`
+- `CHECKERBOARD`, `CHECKERBOARD_1D`
+- `AIRCAVITY_1D`, `WATERPHANTOM`, `RADIATIONCT`
+- `MELTINGCUBE`, `MELTINGCUBE_1D`
+- `STARMAP_VALIDATION`
+- `HOHLRAUM`, `SYMMETRIC_HOHLRAUM`, `QUARTER_HOHLRAUM`
+- `LATTICE`, `HALF_LATTICE`
+
+`QUAD_TYPE`:
+
+- `MONTE_CARLO`
+- `GAUSS_LEGENDRE_TENSORIZED`, `GAUSS_LEGENDRE_TENSORIZED_2D`, `GAUSS_LEGENDRE_1D`
+- `LEVEL_SYMMETRIC`, `LEBEDEV`, `LDFESA`, `TESSALATION`, `PRODUCT`
+- `MIDPOINT_1D`, `MIDPOINT_2D`, `MIDPOINT_3D`
+- `RECTANGULAR_1D`, `RECTANGULAR_2D`, `RECTANGULAR_3D`
+
+`KERNEL`:
+
+- `ISOTROPIC`, `ISOTROPIC_1D`
+
+`SPHERICAL_BASIS`:
+
+- `SPHERICAL_HARMONICS`
+- `SPHERICAL_MONOMIALS`
+- `SPHERICAL_MONOMIALS_ROTATED`
+
+HPC SN config pattern
+---------------------
+
+The HPC path is selected with:
+
+- `SOLVER = SN_SOLVER`
+- `HPC_SOLVER = YES`
+
+Example (from validation inputs):
+
+.. code-block:: cfg
+
+   PROBLEM = LATTICE
+   SOLVER = SN_SOLVER
+   HPC_SOLVER = YES
+   RECONS_ORDER = 2
+   TIME_INTEGRATION_ORDER = 2
+   QUAD_TYPE = GAUSS_LEGENDRE_TENSORIZED_2D
+   QUAD_ORDER = 4
+
+Reference configs
+-----------------
+
+Validated examples are under:
+
+- `tests/input/validation_tests/SN_solver`
+- `tests/input/validation_tests/PN_solver`
+- `tests/input/validation_tests/MN_solver`
+- `tests/input/validation_tests/CSD_PN_solver`
+- `tests/input/validation_tests/CSD_MN_solver`
+- `tests/input/validation_tests/SN_solver_hpc`

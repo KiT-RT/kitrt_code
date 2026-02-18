@@ -1,7 +1,12 @@
-PyHelper
-=============
+Py Helper
+=========
 
-.. doxygenclass:: PyHelper
+.. doxygenclass:: CPyInstance
+   :members:
+   :protected-members:
+   :private-members:
+
+.. doxygenclass:: CPyObject
    :members:
    :protected-members:
    :private-members:

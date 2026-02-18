@@ -1,7 +1,7 @@
-NumericalFlux
-=============
+NumericalFluxBase
+=================
 
-.. doxygenclass:: NumericalFlux
+.. doxygenclass:: NumericalFluxBase
    :members:
    :protected-members:
    :private-members:
