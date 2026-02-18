@@ -26,8 +26,9 @@ KiT-RT is an open-source, multi-fidelity **C++ PDE solver for radiative transpor
 
 ## Scientific Impact
 
-KiT-RT has been adopted by:
+KiT-RT has been adopted by research and engineering teams of:
 
+* NVIDIA
 * Sandia National Labs
 * Lawrence Livermore National Labs
 * Oak Ridge National Labs
