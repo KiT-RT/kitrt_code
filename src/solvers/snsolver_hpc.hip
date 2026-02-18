@@ -10,13 +10,12 @@
 #include "solvers/snsolver_hpc_hip.hpp"
 #include "toolboxes/textprocessingtoolbox.hpp"
 #include <algorithm>
+#include <cassert>
 #include <hip/hip_runtime.h>
 #include <limits>
 #include <string>
-#include <cassert>
 
-struct SNSolverHPCHIP::DeviceBuffers
-{
+struct SNSolverHPCHIP::DeviceBuffers {
     double* areas                = nullptr;
     double* normals              = nullptr;
     unsigned* neighbors          = nullptr;
@@ -51,8 +50,7 @@ inline void CheckHip( hipError_t status, const std::string& where ) {
     }
 }
 
-template <typename T>
-inline void AllocateDeviceArray( T** ptr, std::size_t count, const std::string& name ) {
+template <typename T> inline void AllocateDeviceArray( T** ptr, std::size_t count, const std::string& name ) {
     if( count == 0 ) {
         *ptr = nullptr;
         return;
@@ -60,8 +58,7 @@ inline void AllocateDeviceArray( T** ptr, std::size_t count, const std::string& 
     CheckHip( hipMalloc( reinterpret_cast<void**>( ptr ), count * sizeof( T ) ), "hipMalloc(" + name + ")" );
 }
 
-template <typename T>
-inline void FreeDeviceArray( T*& ptr, const std::string& name ) {
+template <typename T> inline void FreeDeviceArray( T*& ptr, const std::string& name ) {
     if( ptr == nullptr ) return;
     CheckHip( hipFree( ptr ), "hipFree(" + name + ")" );
     ptr = nullptr;
@@ -69,7 +66,8 @@ inline void FreeDeviceArray( T*& ptr, const std::string& name ) {
 
 __device__ __forceinline__ unsigned long Idx2DDevice( unsigned long idx1, unsigned long idx2, unsigned long len2 ) { return idx1 * len2 + idx2; }
 
-__device__ __forceinline__ unsigned long Idx3DDevice( unsigned long idx1, unsigned long idx2, unsigned long idx3, unsigned long len2, unsigned long len3 ) {
+__device__ __forceinline__ unsigned long
+Idx3DDevice( unsigned long idx1, unsigned long idx2, unsigned long idx3, unsigned long len2, unsigned long len3 ) {
     return idx1 * len2 * len3 + idx2 * len3 + idx3;
 }
 
@@ -94,19 +92,17 @@ __global__ void FluxOrder1Kernel( unsigned long nCells,
 
     double localFlux = 0.0;
     for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
-        const unsigned nbrCell = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
-        const double localInner =
-            quadPts[Idx2DDevice( idxSys, 0, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
-            quadPts[Idx2DDevice( idxSys, 1, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
+        const unsigned nbrCell  = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
+        const double localInner = quadPts[Idx2DDevice( idxSys, 0, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+                                  quadPts[Idx2DDevice( idxSys, 1, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
 
         if( boundaryTypes[idxCell] == neumannBoundary && nbrCell == nCells ) {
             localFlux += ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
                                               : localInner * ghostCellValues[Idx2DDevice( idxCell, idxSys, localNSys )];
         }
         else {
-            localFlux +=
-                ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
-                                     : localInner * sol[Idx2DDevice( static_cast<unsigned long>( nbrCell ), idxSys, localNSys )];
+            localFlux += ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
+                                              : localInner * sol[Idx2DDevice( static_cast<unsigned long>( nbrCell ), idxSys, localNSys )];
         }
     }
     flux[Idx2DDevice( idxCell, idxSys, localNSys )] = localFlux;
@@ -142,8 +138,8 @@ __global__ void FluxOrder2SlopeKernel( unsigned long nCells,
         return;
     }
 
-    double slopeX = 0.0;
-    double slopeY = 0.0;
+    double slopeX        = 0.0;
+    double slopeY        = 0.0;
     const double thisSol = sol[Idx2DDevice( idxCell, idxSys, localNSys )];
 
     for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
@@ -194,8 +190,8 @@ __global__ void FluxOrder2LimiterKernel( unsigned long nCells,
         minSol                 = fmin( minSol, nbrSol );
     }
 
-    double limVal  = 1.0;
-    const double d = areas[idxCell];
+    double limVal   = 1.0;
+    const double d  = areas[idxCell];
     const double sx = solDx[Idx3DDevice( idxCell, idxSys, 0, localNSys, nDim )];
     const double sy = solDx[Idx3DDevice( idxCell, idxSys, 1, localNSys, nDim )];
 
@@ -248,10 +244,9 @@ __global__ void FluxOrder2Kernel( unsigned long nCells,
 
     double localFlux = 0.0;
     for( unsigned long idxNbr = 0; idxNbr < nNbr; ++idxNbr ) {
-        const unsigned nbrCell = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
-        const double localInner =
-            quadPts[Idx2DDevice( idxSys, 0, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
-            quadPts[Idx2DDevice( idxSys, 1, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
+        const unsigned nbrCell  = neighbors[Idx2DDevice( idxCell, idxNbr, nNbr )];
+        const double localInner = quadPts[Idx2DDevice( idxSys, 0, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+                                  quadPts[Idx2DDevice( idxSys, 1, nDim )] * normals[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )];
 
         if( boundaryTypes[idxCell] == neumannBoundary && nbrCell == nCells ) {
             localFlux += ( localInner > 0.0 ) ? localInner * sol[Idx2DDevice( idxCell, idxSys, localNSys )]
@@ -260,24 +255,23 @@ __global__ void FluxOrder2Kernel( unsigned long nCells,
         }
 
         if( localInner > 0.0 ) {
-            const double recVal = sol[Idx2DDevice( idxCell, idxSys, localNSys )] +
-                                  limiter[Idx2DDevice( idxCell, idxSys, localNSys )] *
-                                      ( solDx[Idx3DDevice( idxCell, idxSys, 0, localNSys, nDim )] *
-                                            relativeInterfaceMid[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
-                                        solDx[Idx3DDevice( idxCell, idxSys, 1, localNSys, nDim )] *
-                                            relativeInterfaceMid[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )] );
+            const double recVal =
+                sol[Idx2DDevice( idxCell, idxSys, localNSys )] +
+                limiter[Idx2DDevice( idxCell, idxSys, localNSys )] * ( solDx[Idx3DDevice( idxCell, idxSys, 0, localNSys, nDim )] *
+                                                                           relativeInterfaceMid[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] +
+                                                                       solDx[Idx3DDevice( idxCell, idxSys, 1, localNSys, nDim )] *
+                                                                           relativeInterfaceMid[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )] );
             localFlux += localInner * recVal;
         }
         else {
             const unsigned long nbrCellUL = static_cast<unsigned long>( nbrCell );
-            const double recVal           = sol[Idx2DDevice( nbrCellUL, idxSys, localNSys )] +
-                                  limiter[Idx2DDevice( nbrCellUL, idxSys, localNSys )] *
-                                      ( solDx[Idx3DDevice( nbrCellUL, idxSys, 0, localNSys, nDim )] *
-                                            ( interfaceMidPoints[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] -
-                                              cellMidPoints[Idx2DDevice( nbrCellUL, 0, nDim )] ) +
-                                        solDx[Idx3DDevice( nbrCellUL, idxSys, 1, localNSys, nDim )] *
-                                            ( interfaceMidPoints[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )] -
-                                              cellMidPoints[Idx2DDevice( nbrCellUL, 1, nDim )] ) );
+            const double recVal =
+                sol[Idx2DDevice( nbrCellUL, idxSys, localNSys )] +
+                limiter[Idx2DDevice( nbrCellUL, idxSys, localNSys )] *
+                    ( solDx[Idx3DDevice( nbrCellUL, idxSys, 0, localNSys, nDim )] *
+                          ( interfaceMidPoints[Idx3DDevice( idxCell, idxNbr, 0, nNbr, nDim )] - cellMidPoints[Idx2DDevice( nbrCellUL, 0, nDim )] ) +
+                      solDx[Idx3DDevice( nbrCellUL, idxSys, 1, localNSys, nDim )] *
+                          ( interfaceMidPoints[Idx3DDevice( idxCell, idxNbr, 1, nNbr, nDim )] - cellMidPoints[Idx2DDevice( nbrCellUL, 1, nDim )] ) );
             localFlux += localInner * recVal;
         }
     }
@@ -314,19 +308,19 @@ __global__ void FVMUpdateKernel( unsigned long nCells,
 }
 
 __global__ void RK2AverageAndScalarFluxKernel( unsigned long nCells,
-                                                unsigned long localNSys,
-                                                const double* __restrict__ quadWeights,
-                                                const double* __restrict__ solRK0,
-                                                double* sol,
-                                                double* scalarFlux ) {
+                                               unsigned long localNSys,
+                                               const double* __restrict__ quadWeights,
+                                               const double* __restrict__ solRK0,
+                                               double* sol,
+                                               double* scalarFlux ) {
     const unsigned long idxCell = static_cast<unsigned long>( blockIdx.x ) * blockDim.x + threadIdx.x;
     if( idxCell >= nCells ) return;
 
     double localScalarFlux = 0.0;
     for( unsigned long idxSys = 0; idxSys < localNSys; ++idxSys ) {
         const unsigned long idx = Idx2DDevice( idxCell, idxSys, localNSys );
-        const double avgVal      = 0.5 * ( solRK0[idx] + sol[idx] );
-        sol[idx]                 = avgVal;
+        const double avgVal     = 0.5 * ( solRK0[idx] + sol[idx] );
+        sol[idx]                = avgVal;
         localScalarFlux += avgVal * quadWeights[idxSys];
     }
     scalarFlux[idxCell] = localScalarFlux;
@@ -350,7 +344,7 @@ SNSolverHPCHIP::SNSolverHPCHIP( Config* settings ) {
     _nOutputMoments = 2;    //  Currently only u_1 (x direction) and u_1 (y direction) are supported
     _hipInitialized = false;
     _hipDeviceId    = 0;
-    _device          = nullptr;
+    _device         = nullptr;
     // Create Mesh
     _mesh = LoadSU2MeshFromFile( settings );
     _settings->SetNCells( _mesh->GetNumCells() );
@@ -694,28 +688,30 @@ void SNSolverHPCHIP::UploadStaticDataToDevice() {
     CheckHip( hipMemcpy( _device->normals, _normals.data(), nCellNbrDim * sizeof( double ), hipMemcpyHostToDevice ), "copy normals" );
     CheckHip( hipMemcpy( _device->neighbors, _neighbors.data(), nCellNbr * sizeof( unsigned ), hipMemcpyHostToDevice ), "copy neighbors" );
     CheckHip( hipMemcpy( _device->boundaryTypes, _cellBoundaryTypesInt.data(), nCells * sizeof( int ), hipMemcpyHostToDevice ),
-               "copy boundary types" );
+              "copy boundary types" );
     CheckHip( hipMemcpy( _device->ghostCellValues, _ghostCellValues.data(), nCellSys * sizeof( double ), hipMemcpyHostToDevice ),
-               "copy ghost values" );
+              "copy ghost values" );
     CheckHip(
-        hipMemcpy( _device->cellMidPoints, _cellMidPoints.data(), nCells * static_cast<std::size_t>( _nDim ) * sizeof( double ), hipMemcpyHostToDevice ),
+        hipMemcpy(
+            _device->cellMidPoints, _cellMidPoints.data(), nCells * static_cast<std::size_t>( _nDim ) * sizeof( double ), hipMemcpyHostToDevice ),
         "copy cell midpoints" );
     CheckHip( hipMemcpy( _device->interfaceMidPoints, _interfaceMidPoints.data(), nCellNbrDim * sizeof( double ), hipMemcpyHostToDevice ),
-               "copy interface midpoints" );
+              "copy interface midpoints" );
     CheckHip( hipMemcpy( _device->relativeInterfaceMid, _relativeInterfaceMidPt.data(), nCellNbrDim * sizeof( double ), hipMemcpyHostToDevice ),
-               "copy relative interface points" );
+              "copy relative interface points" );
     CheckHip( hipMemcpy( _device->relativeCellVertices, _relativeCellVertices.data(), nCellNbrDim * sizeof( double ), hipMemcpyHostToDevice ),
-               "copy relative vertices" );
+              "copy relative vertices" );
     CheckHip( hipMemcpy( _device->sigmaS, _sigmaS.data(), nCells * sizeof( double ), hipMemcpyHostToDevice ), "copy sigmaS" );
     CheckHip( hipMemcpy( _device->sigmaT, _sigmaT.data(), nCells * sizeof( double ), hipMemcpyHostToDevice ), "copy sigmaT" );
     CheckHip( hipMemcpy( _device->source, _source.data(), nCellSys * sizeof( double ), hipMemcpyHostToDevice ), "copy source" );
     CheckHip( hipMemcpy( _device->quadPts, _quadPts.data(), nSysDim * sizeof( double ), hipMemcpyHostToDevice ), "copy quad points" );
-    CheckHip( hipMemcpy( _device->quadWeights, _quadWeights.data(), static_cast<std::size_t>( _localNSys ) * sizeof( double ), hipMemcpyHostToDevice ),
-               "copy quad weights" );
+    CheckHip(
+        hipMemcpy( _device->quadWeights, _quadWeights.data(), static_cast<std::size_t>( _localNSys ) * sizeof( double ), hipMemcpyHostToDevice ),
+        "copy quad weights" );
 
     CheckHip( hipMemset( _device->flux, 0, nCellSys * sizeof( double ) ), "init flux" );
     CheckHip( hipMemcpy( _device->solDx, _solDx.data(), nCellSys * static_cast<std::size_t>( _nDim ) * sizeof( double ), hipMemcpyHostToDevice ),
-               "init solDx" );
+              "init solDx" );
     CheckHip( hipMemcpy( _device->limiter, _limiter.data(), nCellSys * sizeof( double ), hipMemcpyHostToDevice ), "init limiter" );
 }
 
@@ -770,7 +766,7 @@ void SNSolverHPCHIP::FreeHIP() {
     FreeDeviceArray( _device->limiter, "limiter" );
 
     delete _device;
-    _device          = nullptr;
+    _device         = nullptr;
     _hipInitialized = false;
 }
 
@@ -803,10 +799,10 @@ void SNSolverHPCHIP::Solve() {
         if( _temporalOrder == 2 ) {
             CheckHip( hipSetDevice( _hipDeviceId ), "hipSetDevice" );
             CheckHip( hipMemcpy( _device->solRK0,
-                                   _device->sol,
-                                   static_cast<std::size_t>( _nCells ) * static_cast<std::size_t>( _localNSys ) * sizeof( double ),
-                                   hipMemcpyDeviceToDevice ),
-                       "backup solRK0" );
+                                 _device->sol,
+                                 static_cast<std::size_t>( _nCells ) * static_cast<std::size_t>( _localNSys ) * sizeof( double ),
+                                 hipMemcpyDeviceToDevice ),
+                      "backup solRK0" );
 
             ( _spatialOrder == 2 ) ? FluxOrder2() : FluxOrder1();
             FVMUpdate();
@@ -819,11 +815,9 @@ void SNSolverHPCHIP::Solve() {
                 _nCells, _localNSys, _device->quadWeights, _device->solRK0, _device->sol, _device->scalarFlux );
             CheckHip( hipGetLastError(), "RK2AverageAndScalarFluxKernel launch" );
 #ifdef IMPORT_MPI
-            CheckHip( hipMemcpy( _scalarFlux.data(),
-                                   _device->scalarFlux,
-                                   static_cast<std::size_t>( _nCells ) * sizeof( double ),
-                                   hipMemcpyDeviceToHost ),
-                       "download scalar flux after RK2 average" );
+            CheckHip(
+                hipMemcpy( _scalarFlux.data(), _device->scalarFlux, static_cast<std::size_t>( _nCells ) * sizeof( double ), hipMemcpyDeviceToHost ),
+                "download scalar flux after RK2 average" );
             std::vector<double> tempScalarFlux( _scalarFlux );
             MPI_Barrier( MPI_COMM_WORLD );
             MPI_Allreduce( tempScalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
@@ -969,20 +963,16 @@ void SNSolverHPCHIP::FVMUpdate() {
                                              _device->scalarFlux,
                                              invTwoPi );
     CheckHip( hipGetLastError(), "FVMUpdateKernel launch" );
-    CheckHip( hipMemcpy( _scalarFlux.data(),
-                           _device->scalarFlux,
-                           static_cast<std::size_t>( _nCells ) * sizeof( double ),
-                           hipMemcpyDeviceToHost ),
-               "download scalar flux in FVMUpdate" );
+    CheckHip( hipMemcpy( _scalarFlux.data(), _device->scalarFlux, static_cast<std::size_t>( _nCells ) * sizeof( double ), hipMemcpyDeviceToHost ),
+              "download scalar flux in FVMUpdate" );
 
 #ifdef IMPORT_MPI
     std::vector<double> tempScalarFlux( _scalarFlux );
     MPI_Barrier( MPI_COMM_WORLD );
     MPI_Allreduce( tempScalarFlux.data(), _scalarFlux.data(), _nCells, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD );
     MPI_Barrier( MPI_COMM_WORLD );
-    CheckHip(
-        hipMemcpy( _device->scalarFlux, _scalarFlux.data(), static_cast<std::size_t>( _nCells ) * sizeof( double ), hipMemcpyHostToDevice ),
-        "sync allreduced scalar flux to device" );
+    CheckHip( hipMemcpy( _device->scalarFlux, _scalarFlux.data(), static_cast<std::size_t>( _nCells ) * sizeof( double ), hipMemcpyHostToDevice ),
+              "sync allreduced scalar flux to device" );
 #endif
 }
 
