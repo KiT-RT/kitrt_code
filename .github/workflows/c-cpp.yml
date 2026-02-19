@@ -8,32 +8,122 @@ on:
 
 jobs:
   unit_tests:
-      runs-on: ubuntu-latest
-      container: kitrt/test:latest
-      environment: coverage
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
-        OMP_NUM_THREADS: 1
-        OMP_DYNAMIC: FALSE
-        OPENBLAS_NUM_THREADS: 1
-        MKL_NUM_THREADS: 1
+    runs-on: ubuntu-latest
+    container: kitrt/test:latest
+    environment: coverage
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+      OMP_NUM_THREADS: 1
+      OMP_DYNAMIC: FALSE
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
 
-      steps:
-      - uses: actions/checkout@v2
+    steps:
+    - uses: actions/checkout@v2
 
-      - name: Build code
-        run: |
-          git submodule update --init --recursive
-          mkdir build && cd build
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_ML=OFF -DBUILD_CODE_COV=ON ..
-          ninja
+    - name: Build code
+      run: |
+        git submodule update --init --recursive
+        mkdir build && cd build
+        cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_ML=OFF -DBUILD_CODE_COV=ON ..
+        ninja
 
-      - name: Run unit tests
-        run: |
-          cd build
-          ./unit_tests 
+    - name: Run unit tests
+      run: |
+        cd build
+        ./unit_tests
 
-      - name: Code coverage
-        run: |
-          cpp-coveralls -r . -b "build/" -i "src/" -i "include/" --exclude "ext/" --gcov-options "\-lp" --verbose
+    - name: Code coverage
+      run: |
+        cpp-coveralls -r . -b "build/" -i "src/" -i "include/" --exclude "ext/" --gcov-options "\-lp" --verbose
+
+  rocm_build:
+    runs-on: ubuntu-latest
+    container: rocm/dev-ubuntu-22.04:7.2-complete
+    env:
+      OMP_NUM_THREADS: 1
+      OMP_DYNAMIC: FALSE
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install ROCm build dependencies
+      run: |
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          libopenmpi-dev \
+          openmpi-bin \
+          libblas-dev \
+          liblapack-dev \
+          cmake \
+          ninja-build \
+          libvtk9-dev
+
+    - name: Build ROCm target
+      run: |
+        git submodule update --init --recursive
+        ROCM_CLANGXX="/opt/rocm-7.2.0/lib/llvm/bin/clang++"
+        if [ ! -x "${ROCM_CLANGXX}" ] && [ -x "/opt/rocm/lib/llvm/bin/clang++" ]; then
+          ROCM_CLANGXX="/opt/rocm/lib/llvm/bin/clang++"
+        fi
+        if [ ! -x "${ROCM_CLANGXX}" ] && [ -x "/opt/rocm/llvm/bin/clang++" ]; then
+          ROCM_CLANGXX="/opt/rocm/llvm/bin/clang++"
+        fi
+        if [ ! -x "${ROCM_CLANGXX}" ]; then
+          echo "Could not find ROCm clang++ compiler." >&2
+          exit 1
+        fi
+        cmake -G Ninja -S . -B build_rocm \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_COMPILER="${ROCM_CLANGXX}" \
+          -DCMAKE_HIP_COMPILER="${ROCM_CLANGXX}" \
+          -DBUILD_MPI=ON \
+          -DBUILD_CUDA_HPC=OFF \
+          -DBUILD_HIP_HPC=ON \
+          -DBUILD_ML=OFF
+        cmake --build build_rocm -j2
+
+  cuda_build:
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    env:
+      OMP_NUM_THREADS: 1
+      OMP_DYNAMIC: FALSE
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install CUDA build dependencies
+      run: |
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          git \
+          libopenmpi-dev \
+          openmpi-bin \
+          libblas-dev \
+          liblapack-dev \
+          cmake \
+          ninja-build \
+          libvtk9-dev
+
+    - name: Build CUDA target and tests
+      run: |
+        git submodule update --init --recursive
+        cmake -G Ninja -S . -B build_cuda \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_TESTING=ON \
+          -DBUILD_MPI=ON \
+          -DBUILD_CUDA_HPC=ON \
+          -DBUILD_HIP_HPC=OFF \
+          -DBUILD_ML=OFF \
+          -DCMAKE_CUDA_ARCHITECTURES=70
+        cmake --build build_cuda -j2
+
+    - name: Run non-GPU tests from CUDA build
+      run: |
+        ./build_cuda/unit_tests "~[cuda]~[hip]"

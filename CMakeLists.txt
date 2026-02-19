@@ -136,13 +136,11 @@ endif()
 
 if( BUILD_HIP_HPC )
     if( TARGET hip::host )
+        # Link only the host runtime to avoid propagating HIP device compile flags
+        # (e.g. --offload-arch=...) into non-HIP C++ translation units.
         list( APPEND CORE_LIBRARIES hip::host )
-    endif()
-    if( TARGET hip::device )
-        list( APPEND CORE_LIBRARIES hip::device )
-    endif()
-    if( NOT TARGET hip::host AND NOT TARGET hip::device )
-        message( FATAL_ERROR "Could not find HIP runtime targets (hip::host/hip::device)." )
+    else()
+        message( FATAL_ERROR "Could not find HIP runtime target (hip::host)." )
     endif()
 endif()
 
