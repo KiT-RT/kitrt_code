@@ -44,7 +44,7 @@ jobs:
 
   rocm_build:
     runs-on: ubuntu-latest
-    container: rocm/dev-ubuntu-22.04:7.2-complete
+    container: rocm/dev-ubuntu-22.04:7.2
     env:
       OMP_NUM_THREADS: 1
       OMP_DYNAMIC: FALSE
