@@ -1,5 +1,5 @@
 cmake_minimum_required( VERSION 3.16 )
-project( KiT-RT VERSION 0.1.0 LANGUAGES CXX )
+project( KiT-RT VERSION 1.2.0 LANGUAGES CXX )
 
 ### OPTIONS #####################################
 option( BUILD_TESTING "builds all available unit tests" OFF )
@@ -43,6 +43,13 @@ endif()
 set( KITRT_RELEASE_OPTIONS -march=native -w )
 set( KITRT_RELWITHDEBINFO_OPTIONS -march=native -pg -no-pie )
 set( KITRT_DEBUG_OPTIONS -Wall -Wextra -Wpedantic )
+if( BUILD_HIP_HPC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|amd64|AMD64" )
+    # ROCm clang can expose AVX-512 feature macros that trigger an incompatible
+    # Blaze SIMD floor implementation path on some hosts.
+    list( APPEND KITRT_RELEASE_OPTIONS -mno-avx512f -mno-avx512bw -mno-avx512dq )
+    list( APPEND KITRT_RELWITHDEBINFO_OPTIONS -mno-avx512f -mno-avx512bw -mno-avx512dq )
+    message( STATUS "HIP host C++ compile options: disabling AVX-512 for Blaze compatibility" )
+endif()
 if( BUILD_UNITY AND NOT BUILD_CODE_COV )
     message( STATUS "Unity build enabled" )
     set( CMAKE_UNITY_BUILD ON )
@@ -136,13 +143,11 @@ endif()
 
 if( BUILD_HIP_HPC )
     if( TARGET hip::host )
+        # Link only the host runtime to avoid propagating HIP device compile flags
+        # (e.g. --offload-arch=...) into non-HIP C++ translation units.
         list( APPEND CORE_LIBRARIES hip::host )
-    endif()
-    if( TARGET hip::device )
-        list( APPEND CORE_LIBRARIES hip::device )
-    endif()
-    if( NOT TARGET hip::host AND NOT TARGET hip::device )
-        message( FATAL_ERROR "Could not find HIP runtime targets (hip::host/hip::device)." )
+    else()
+        message( FATAL_ERROR "Could not find HIP runtime target (hip::host)." )
     endif()
 endif()
 
