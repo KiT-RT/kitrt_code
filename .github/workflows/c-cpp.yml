@@ -10,6 +10,9 @@ jobs:
   unit_tests:
       runs-on: ubuntu-latest
       container: kitrt/test:latest
+      defaults:
+        run:
+          working-directory: ${{ github.workspace }}
       environment: coverage
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -20,11 +23,12 @@ jobs:
         MKL_NUM_THREADS: 1
 
       steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build code
         run: |
-          git submodule update --init --recursive
           mkdir build && cd build
           cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_ML=OFF -DBUILD_CODE_COV=ON ..
           ninja
