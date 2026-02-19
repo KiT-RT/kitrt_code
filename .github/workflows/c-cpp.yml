@@ -83,10 +83,26 @@ jobs:
           echo "Could not find ROCm clang++ compiler." >&2
           exit 1
         fi
+        HIP_DIR=""
+        for CANDIDATE in \
+          "/opt/rocm-7.2.0/lib/cmake/hip" \
+          "/opt/rocm/lib/cmake/hip" \
+          "/opt/rocm/cmake/hip"
+        do
+          if [ -f "${CANDIDATE}/hip-config.cmake" ] || [ -f "${CANDIDATE}/hipConfig.cmake" ]; then
+            HIP_DIR="${CANDIDATE}"
+            break
+          fi
+        done
+        if [ -z "${HIP_DIR}" ]; then
+          echo "Could not find hip package config directory." >&2
+          exit 1
+        fi
         cmake -G Ninja -S . -B build_rocm \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_CXX_COMPILER="${ROCM_CLANGXX}" \
           -DCMAKE_HIP_COMPILER="${ROCM_CLANGXX}" \
+          -Dhip_DIR="${HIP_DIR}" \
           -DBUILD_MPI=ON \
           -DBUILD_CUDA_HPC=OFF \
           -DBUILD_HIP_HPC=ON \
