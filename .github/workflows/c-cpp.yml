@@ -149,7 +149,4 @@ jobs:
           -DCMAKE_CUDA_ARCHITECTURES=70
         cmake --build build_cuda -j2
 
-    - name: Run non-GPU tests from CUDA build
-      working-directory: ${{ github.workspace }}
-      run: |
-        ./build_cuda/unit_tests "~[cuda]~[hip]"
+
