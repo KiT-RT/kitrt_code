@@ -18,6 +18,10 @@
 #include <cuda_runtime.h>
 #include "solvers/snsolver_hpc_cuda.hpp"
 #endif
+#ifdef KITRT_ENABLE_HIP_HPC
+#include <hip/hip_runtime.h>
+#include "solvers/snsolver_hpc_hip.hpp"
+#endif
 #include "solvers/solverbase.hpp"
 
 #ifdef BUILD_GUI
@@ -63,10 +67,22 @@ int main( int argc, char** argv ) {
     else {
         // Build solver
         if( config->GetHPC() ) {
-#ifdef KITRT_ENABLE_CUDA_HPC
+#if defined( KITRT_ENABLE_CUDA_HPC )
             int deviceCount = 0;
             if( cudaGetDeviceCount( &deviceCount ) == cudaSuccess && deviceCount > 0 ) {
                 SNSolverHPCCUDA* solver = new SNSolverHPCCUDA( config );
+                solver->Solve();
+                delete solver;
+            }
+            else {
+                SNSolverHPC* solver = new SNSolverHPC( config );
+                solver->Solve();
+                delete solver;
+            }
+#elif defined( KITRT_ENABLE_HIP_HPC )
+            int deviceCount = 0;
+            if( hipGetDeviceCount( &deviceCount ) == hipSuccess && deviceCount > 0 ) {
+                SNSolverHPCHIP* solver = new SNSolverHPCHIP( config );
                 solver->Solve();
                 delete solver;
             }

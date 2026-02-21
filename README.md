@@ -143,9 +143,9 @@ singularity exec tools/singularity/kit_rt_MPI.sif \
   mpirun -np 4 ./build_singularity_mpi/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cpu_order2.cfg
 ```
 
-### 3. CPU + CUDA (single or multi-GPU via MPI)
+### 3. CPU + GPU backend (single or multi-GPU via MPI)
 
-#### 3a) Singularity installation
+#### 3a) CUDA (Singularity installation)
 ```bash
 cd tools/singularity
 sudo singularity build kit_rt_MPI_cuda.sif kit_rt_MPI_cuda.def
@@ -161,6 +161,23 @@ singularity exec --nv tools/singularity/kit_rt_MPI_cuda.sif \
 ```
 
 When compiled with `-DBUILD_CUDA_HPC=ON`, HPC runs use the CUDA backend if a GPU is visible, and fall back to CPU if no GPU is detected.
+
+#### 3b) ROCm/HIP (Singularity installation)
+```bash
+cd tools/singularity
+sudo singularity build kit_rt_MPI_rocm72.sif kit_rt_MPI_rocm72.def
+cd ../..
+mkdir -p build_singularity_rocm72
+cd build_singularity_rocm72
+singularity exec --rocm ../tools/singularity/kit_rt_MPI_rocm72.sif \
+  cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=OFF -DBUILD_HIP_HPC=ON -DBUILD_ML=OFF ..
+singularity exec --rocm ../tools/singularity/kit_rt_MPI_rocm72.sif make -j
+cd ..
+singularity exec --rocm tools/singularity/kit_rt_MPI_rocm72.sif \
+  mpirun -np 2 ./build_singularity_rocm72/KiT-RT tests/input/validation_tests/SN_solver_hpc/lattice_hpc_200_cuda_order2.cfg
+```
+
+When compiled with `-DBUILD_HIP_HPC=ON`, HPC runs use the HIP backend if a ROCm-capable GPU is visible, and fall back to CPU if no GPU is detected.
 
 ### 4. Build with TensorFlow backend (CPU + OpenMP only)
 
