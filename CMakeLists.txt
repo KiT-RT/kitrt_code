@@ -1,5 +1,5 @@
 cmake_minimum_required( VERSION 3.16 )
-project( KiT-RT VERSION 0.1.0 LANGUAGES CXX )
+project( KiT-RT VERSION 1.2.0 LANGUAGES CXX )
 
 ### OPTIONS #####################################
 option( BUILD_TESTING "builds all available unit tests" OFF )
@@ -10,12 +10,16 @@ option( BUILD_CODE_COV "enables compiler option required for code coverage analy
 option( BUILD_ML "enables build with tensorflow backend access" OFF )
 option( BUILD_MPI "enables build with MPI access" OFF )
 option( BUILD_CUDA_HPC "enables CUDA backend for SN HPC solver (MPI rank to GPU mapping)" OFF )
+option( BUILD_HIP_HPC "enables HIP/ROCm backend for SN HPC solver (MPI rank to GPU mapping)" OFF )
 #################################################
 
 
 ### COMPILER ####################################
 set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED ON )
+if( BUILD_CUDA_HPC AND BUILD_HIP_HPC )
+    message( FATAL_ERROR "BUILD_CUDA_HPC and BUILD_HIP_HPC cannot both be enabled." )
+endif()
 if( BUILD_CUDA_HPC )
     enable_language( CUDA )
     if( CMAKE_VERSION VERSION_LESS 3.18 )
@@ -27,9 +31,25 @@ if( BUILD_CUDA_HPC )
     set( CMAKE_CUDA_STANDARD_REQUIRED ON )
     set( CMAKE_CUDA_EXTENSIONS OFF )
 endif()
+if( BUILD_HIP_HPC )
+    if( CMAKE_VERSION VERSION_LESS 3.21 )
+        message( FATAL_ERROR "BUILD_HIP_HPC requires CMake >= 3.21 for HIP language support." )
+    endif()
+    enable_language( HIP )
+    set( CMAKE_HIP_STANDARD 17 )
+    set( CMAKE_HIP_STANDARD_REQUIRED ON )
+    set( CMAKE_HIP_EXTENSIONS OFF )
+endif()
 set( KITRT_RELEASE_OPTIONS -march=native -w )
 set( KITRT_RELWITHDEBINFO_OPTIONS -march=native -pg -no-pie )
 set( KITRT_DEBUG_OPTIONS -Wall -Wextra -Wpedantic )
+if( BUILD_HIP_HPC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|amd64|AMD64" )
+    # ROCm clang can expose AVX-512 feature macros that trigger an incompatible
+    # Blaze SIMD floor implementation path on some hosts.
+    list( APPEND KITRT_RELEASE_OPTIONS -mno-avx512f -mno-avx512bw -mno-avx512dq )
+    list( APPEND KITRT_RELWITHDEBINFO_OPTIONS -mno-avx512f -mno-avx512bw -mno-avx512dq )
+    message( STATUS "HIP host C++ compile options: disabling AVX-512 for Blaze compatibility" )
+endif()
 if( BUILD_UNITY AND NOT BUILD_CODE_COV )
     message( STATUS "Unity build enabled" )
     set( CMAKE_UNITY_BUILD ON )
@@ -55,6 +75,14 @@ if( BUILD_CUDA_HPC )
     message( STATUS "CUDA HPC solver: enabled" )
 else()
     message( STATUS "CUDA HPC solver: disabled" )
+endif()
+
+if( BUILD_HIP_HPC )
+    add_compile_definitions( KITRT_ENABLE_HIP_HPC )
+    find_package( hip REQUIRED CONFIG )
+    message( STATUS "HIP HPC solver: enabled" )
+else()
+    message( STATUS "HIP HPC solver: disabled" )
 endif()
 
 message(STATUS "MPI build flag: ${BUILD_MPI}")
@@ -113,6 +141,16 @@ if( BUILD_CUDA_HPC )
     endif()
 endif()
 
+if( BUILD_HIP_HPC )
+    if( TARGET hip::host )
+        # Link only the host runtime to avoid propagating HIP device compile flags
+        # (e.g. --offload-arch=...) into non-HIP C++ translation units.
+        list( APPEND CORE_LIBRARIES hip::host )
+    else()
+        message( FATAL_ERROR "Could not find HIP runtime target (hip::host)." )
+    endif()
+endif()
+
 
 #################################################
 
@@ -135,6 +173,10 @@ if( BUILD_CUDA_HPC )
     # Force nvcc to parse this translation unit as C++17 even if transitive
     # imported target features inject an older fallback standard.
     set_source_files_properties( src/solvers/snsolver_hpc.cu PROPERTIES COMPILE_FLAGS "--std=c++17" )
+endif()
+if( BUILD_HIP_HPC )
+    list( APPEND SRCS "src/solvers/snsolver_hpc.hip" "include/solvers/snsolver_hpc_hip.hpp" )
+    set_source_files_properties( src/solvers/snsolver_hpc.hip PROPERTIES LANGUAGE HIP )
 endif()
 set( EXCLUDE_DIR "/gui/" )
 foreach( TMP_PATH ${SRCS} )
@@ -161,6 +203,12 @@ if( BUILD_CUDA_HPC )
     set_target_properties(
         ${CMAKE_PROJECT_NAME}
         PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_EXTENSIONS OFF
+    )
+endif()
+if( BUILD_HIP_HPC )
+    set_target_properties(
+        ${CMAKE_PROJECT_NAME}
+        PROPERTIES HIP_STANDARD 17 HIP_STANDARD_REQUIRED ON HIP_EXTENSIONS OFF
     )
 endif()
 target_compile_options( ${CMAKE_PROJECT_NAME} PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:DEBUG>>:${KITRT_DEBUG_OPTIONS}>" )
@@ -202,6 +250,12 @@ if( BUILD_TESTING )
         set_target_properties(
             unit_tests
             PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON CUDA_EXTENSIONS OFF
+        )
+    endif()
+    if( BUILD_HIP_HPC )
+        set_target_properties(
+            unit_tests
+            PROPERTIES HIP_STANDARD 17 HIP_STANDARD_REQUIRED ON HIP_EXTENSIONS OFF
         )
     endif()
     target_compile_options( unit_tests PUBLIC "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:DEBUG>>:${KITRT_DEBUG_OPTIONS}>" )
