@@ -199,6 +199,8 @@ enum SCALAR_OUTPUT {
     PROBE_MOMENT_TIME_TRACE,
     VAR_ABSORPTION_GREEN,
     ABSORPTION_GREEN_BLOCK,
+    AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED,
+    VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED,
     ABSORPTION_GREEN_LINE
 };
 
@@ -225,6 +227,8 @@ inline std::map<std::string, SCALAR_OUTPUT> ScalarOutput_Map{ { "ITER", ITER },
                                                               { "PROBE_MOMENT_TIME_TRACE", PROBE_MOMENT_TIME_TRACE },
                                                               { "VAR_ABSORPTION_GREEN", VAR_ABSORPTION_GREEN },
                                                               { "ABSORPTION_GREEN_BLOCK", ABSORPTION_GREEN_BLOCK },
+                                                              { "AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED", AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED },
+                                                              { "VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED", VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED },
                                                               { "ABSORPTION_GREEN_LINE", ABSORPTION_GREEN_LINE } };
 
 // Spherical Basis Name

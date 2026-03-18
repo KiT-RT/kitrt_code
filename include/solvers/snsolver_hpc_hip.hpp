@@ -115,6 +115,8 @@ class SNSolverHPCHIP
     double _curAbsorptionHohlraumVertical;
     double _curAbsorptionHohlraumHorizontal;
     double _varAbsorptionHohlraumGreen;
+    double _avgAbsorptionHohlraumGreenBlockIntegrated;
+    double _varAbsorptionHohlraumGreenBlockIntegrated;
 
     std::vector<std::vector<unsigned>> _probingCellsHohlraum; /*!< @brief Indices of cells that contain a probing sensor */
     std::vector<double> _probingMoments;                      /*!< @brief Solution Momnets at the probing cells that contain a probing sensor */
@@ -127,6 +129,7 @@ class SNSolverHPCHIP
     unsigned _nProbingCellsBlocksGreen;
     std::vector<std::vector<unsigned>> _probingCellsBlocksGreen; /*!< @brief Indices of cells that contain a probing sensor blocks */
     std::vector<double> _absorptionValsBlocksGreen;              /*!< @brief Avg Absorption value at the sampleing blocks of lineGreen */
+    std::vector<double> _absorptionValsBlocksGreenIntegrated; /*!< @brief Internal QoI-3 running values A_i(t) = |g_i|^{-1} \int_{g_i}\int_0^t sigma_a phi d\tau dxdy */
 
     // Design parameters
     std::vector<double> _cornerUpperLeftGreen; /*!< @brief Coord of corner of the green area (minus thickness/2 of it) relative to the green center */

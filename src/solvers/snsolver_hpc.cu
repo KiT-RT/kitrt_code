@@ -513,6 +513,8 @@ SNSolverHPCCUDA::SNSolverHPCCUDA( Config* settings ) {
         _curAbsorptionHohlraumVertical     = 0;
         _curAbsorptionHohlraumHorizontal   = 0;
         _varAbsorptionHohlraumGreen        = 0;
+        _avgAbsorptionHohlraumGreenBlockIntegrated = 0;
+        _varAbsorptionHohlraumGreenBlockIntegrated = 0;
     }
 
     if( _settings->GetLoadRestartSolution() )
@@ -591,9 +593,10 @@ SNSolverHPCCUDA::SNSolverHPCCUDA( Config* settings ) {
 
         _nProbingCellsLineGreen = _settings->GetNumProbingCellsLineHohlraum();
 
-        _nProbingCellsBlocksGreen  = 44;
-        _absorptionValsBlocksGreen = std::vector<double>( _nProbingCellsBlocksGreen, 0. );
-        _absorptionValsLineSegment = std::vector<double>( _nProbingCellsLineGreen, 0.0 );
+        _nProbingCellsBlocksGreen           = 44;
+        _absorptionValsBlocksGreen          = std::vector<double>( _nProbingCellsBlocksGreen, 0. );
+        _absorptionValsBlocksGreenIntegrated = std::vector<double>( _nProbingCellsBlocksGreen, 0. );
+        _absorptionValsLineSegment          = std::vector<double>( _nProbingCellsLineGreen, 0.0 );
 
         SetProbingCellsLineGreen();    // ONLY FOR HOHLRAUM
     }
@@ -1223,6 +1226,8 @@ void SNSolverHPCCUDA::IterPostprocessing() {
     }
     // Update time integral values on rank 0
     if( _rank == 0 ) {
+        constexpr double greenBlockArea = 0.05 * 0.05;
+
         _totalScalarOutflow += _curScalarOutflow * _dT;
         _totalScalarOutflowPeri1 += _curScalarOutflowPeri1 * _dT;
         _totalScalarOutflowPeri2 += _curScalarOutflowPeri2 * _dT;
@@ -1231,6 +1236,20 @@ void SNSolverHPCCUDA::IterPostprocessing() {
         _totalAbsorptionHohlraumCenter += _curAbsorptionHohlraumCenter * _dT;
         _totalAbsorptionHohlraumVertical += _curAbsorptionHohlraumVertical * _dT;
         _totalAbsorptionHohlraumHorizontal += _curAbsorptionHohlraumHorizontal * _dT;
+        for( unsigned i = 0; i < _nProbingCellsBlocksGreen; ++i ) {
+            _absorptionValsBlocksGreenIntegrated[i] += _dT * _absorptionValsBlocksGreen[i] / greenBlockArea;
+        }
+        _avgAbsorptionHohlraumGreenBlockIntegrated = 0.0;
+        _varAbsorptionHohlraumGreenBlockIntegrated = 0.0;
+        for( unsigned i = 0; i < _nProbingCellsBlocksGreen; ++i ) {
+            _avgAbsorptionHohlraumGreenBlockIntegrated += _absorptionValsBlocksGreenIntegrated[i];
+        }
+        _avgAbsorptionHohlraumGreenBlockIntegrated /= static_cast<double>( _nProbingCellsBlocksGreen );
+        for( unsigned i = 0; i < _nProbingCellsBlocksGreen; ++i ) {
+            const double diff = _absorptionValsBlocksGreenIntegrated[i] - _avgAbsorptionHohlraumGreenBlockIntegrated;
+            _varAbsorptionHohlraumGreenBlockIntegrated += diff * diff;
+        }
+        _varAbsorptionHohlraumGreenBlockIntegrated /= static_cast<double>( _nProbingCellsBlocksGreen );
 
         _rmsFlux = sqrt( _rmsFlux );
     }
@@ -1336,6 +1355,8 @@ void SNSolverHPCCUDA::PrepareScreenOutput() {
                 }
                 break;
             case VAR_ABSORPTION_GREEN: _screenOutputFieldNames[idx_field] = "Var. absorption green"; break;
+            case AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED: _screenOutputFieldNames[idx_field] = "A_G"; break;
+            case VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED: _screenOutputFieldNames[idx_field] = "V_G"; break;
 
             default: ErrorMessages::Error( "Screen output field not defined!", CURRENT_FUNCTION ); break;
         }
@@ -1394,6 +1415,12 @@ void SNSolverHPCCUDA::WriteScalarOutput( unsigned idx_iter ) {
                 idx_field--;
                 break;
             case VAR_ABSORPTION_GREEN: _screenOutputFields[idx_field] = _varAbsorptionHohlraumGreen; break;
+            case AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED:
+                _screenOutputFields[idx_field] = _avgAbsorptionHohlraumGreenBlockIntegrated;
+                break;
+            case VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED:
+                _screenOutputFields[idx_field] = _varAbsorptionHohlraumGreenBlockIntegrated;
+                break;
             default: ErrorMessages::Error( "Screen output group not defined!", CURRENT_FUNCTION ); break;
         }
     }
@@ -1452,6 +1479,12 @@ void SNSolverHPCCUDA::WriteScalarOutput( unsigned idx_iter ) {
                 idx_field--;
                 break;
             case VAR_ABSORPTION_GREEN: _historyOutputFields[idx_field] = _varAbsorptionHohlraumGreen; break;
+            case AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED:
+                _historyOutputFields[idx_field] = _avgAbsorptionHohlraumGreenBlockIntegrated;
+                break;
+            case VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED:
+                _historyOutputFields[idx_field] = _varAbsorptionHohlraumGreenBlockIntegrated;
+                break;
             case ABSORPTION_GREEN_LINE:
                 for( unsigned i = 0; i < _settings->GetNumProbingCellsLineHohlraum(); i++ ) {
                     _historyOutputFields[idx_field] = _absorptionValsLineSegment[i];
@@ -1504,6 +1537,8 @@ void SNSolverHPCCUDA::PrintScreenOutput( unsigned idx_iter ) {
                                                         TOTAL_PARTICLE_ABSORPTION_HORIZONTAL,
                                                         PROBE_MOMENT_TIME_TRACE,
                                                         VAR_ABSORPTION_GREEN,
+                                                        AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED,
+                                                        VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED,
                                                         ABSORPTION_GREEN_BLOCK,
                                                         ABSORPTION_GREEN_LINE };
         std::vector<SCALAR_OUTPUT> booleanFields    = { VTK_OUTPUT, CSV_OUTPUT };
@@ -1585,6 +1620,8 @@ void SNSolverHPCCUDA::PrepareHistoryOutput() {
                 idx_field--;
                 break;
             case VAR_ABSORPTION_GREEN: _historyOutputFieldNames[idx_field] = "Var. absorption green"; break;
+            case AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED: _historyOutputFieldNames[idx_field] = "A_G"; break;
+            case VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED: _historyOutputFieldNames[idx_field] = "V_G"; break;
             case ABSORPTION_GREEN_BLOCK:
                 for( unsigned i = 0; i < 44; i++ ) {
                     _historyOutputFieldNames[idx_field] = "Probe Green Block " + std::to_string( i );
