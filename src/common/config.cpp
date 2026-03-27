@@ -806,6 +806,8 @@ void Config::SetPostprocessing() {
                         TOTAL_PARTICLE_ABSORPTION,
                         PROBE_MOMENT_TIME_TRACE,
                         VAR_ABSORPTION_GREEN,
+                        AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED,
+                        VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED,
                     };
 
                     it = std::find( legalOutputs.begin(), legalOutputs.end(), _screenOutput[idx_screenOutput] );
@@ -813,11 +815,12 @@ void Config::SetPostprocessing() {
                     if( it == legalOutputs.end() ) {
                         std::string foundKey = findKey( ScalarOutput_Map, _screenOutput[idx_screenOutput] );
                         ErrorMessages::Error(
-                            "Illegal output field <" + foundKey +
+                                "Illegal output field <" + foundKey +
                                 "> for option SCREEN_OUTPUT for this test case.\n"
                                 "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS, RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, TOTAL_PARTICLE_ABSORPTION_CENTER, \n"
                                 "TOTAL_PARTICLE_ABSORPTION_VERTICAL, TOTAL_PARTICLE_ABSORPTION_HORIZONTAL, PROBE_MOMENT_TIME_TRACE, CUR_OUTFLOW, \n "
-                                "TOTAL_OUTFLOW, MAX_OUTFLOW, VAR_ABSORPTION_GREEN \n"
+                                "TOTAL_OUTFLOW, MAX_OUTFLOW, VAR_ABSORPTION_GREEN, AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED, "
+                                "VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED \n"
                                 "Please check your .cfg file.",
                             CURRENT_FUNCTION );
                     }
@@ -957,6 +960,8 @@ void Config::SetPostprocessing() {
                                      PROBE_MOMENT_TIME_TRACE,
                                      VAR_ABSORPTION_GREEN,
                                      ABSORPTION_GREEN_BLOCK,
+                                     AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED,
+                                     VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED,
                                      ABSORPTION_GREEN_LINE };
 
                     it = std::find( legalOutputs.begin(), legalOutputs.end(), _historyOutput[idx_historyOutput] );
@@ -968,7 +973,8 @@ void Config::SetPostprocessing() {
                                 "> for option HISTORY_OUTPUT for this test case.\n"
                                 "Supported fields are: ITER, SIM_TIME, WALL_TIME, MASS RMS_FLUX, VTK_OUTPUT, CSV_OUTPUT, TOTAL_PARTICLE_ABSORPTION_CENTER, \n "
                                 "TOTAL_PARTICLE_ABSORPTION_VERTICAL, TOTAL_PARTICLE_ABSORPTION_HORIZONTAL,PROBE_MOMENT_TIME_TRACE,  CUR_OUTFLOW, \n"
-                                "TOTAL_OUTFLOW, MAX_OUTFLOW , VAR_ABSORPTION_GREEN, ABSORPTION_GREEN_BLOCK, ABSORPTION_GREEN_LINE \n"
+                                "TOTAL_OUTFLOW, MAX_OUTFLOW , VAR_ABSORPTION_GREEN, ABSORPTION_GREEN_BLOCK, "
+                                "AVG_ABSORPTION_GREEN_BLOCK_INTEGRATED, VAR_ABSORPTION_GREEN_BLOCK_INTEGRATED, ABSORPTION_GREEN_LINE \n"
                                 "Please check your .cfg file.",
                             CURRENT_FUNCTION );
                     }
@@ -1043,6 +1049,7 @@ void Config::SetPostprocessing() {
                 _nHistoryOutput += 44 - 1;    // extend the screen output by the number of probing points
                 for( unsigned i = 0; i < 44; i++ ) _historyOutput.push_back( ABSORPTION_GREEN_BLOCK );
             }
+
         }
     }
 
