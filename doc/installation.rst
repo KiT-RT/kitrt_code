@@ -6,20 +6,33 @@ Installation
 Requirements
 ------------
 
-Required:
+Required for the documented CPU build and smoke test:
 
 - C++17 compiler
 - CMake 3.16+
+- Git and initialized submodules
+- Python 3.10+ for the smoke-test checker
 - OpenMP
-- LAPACK (and optionally BLAS)
-- VTK
-- Git
+- BLAS and LAPACK development libraries
+- VTK development libraries
+
+On Ubuntu systems, the CPU prerequisites are typically provided by packages like:
+
+.. code-block:: bash
+
+   sudo apt-get update
+   sudo apt-get install -y build-essential cmake git python3 libopenblas-dev liblapack-dev libvtk9-dev
+
+Package names vary by distribution and cluster module stack. The important CMake
+packages are OpenMP, BLAS, LAPACK, and VTK.
 
 Optional features:
 
-- MPI (`-DBUILD_MPI=ON`)
+- MPI (`-DBUILD_MPI=ON`; for example Open MPI or MPICH)
 - CUDA backend for the HPC SN solver (`-DBUILD_CUDA_HPC=ON`)
+- HIP/ROCm backend for the HPC SN solver (`-DBUILD_HIP_HPC=ON`; requires CMake 3.21+)
 - TensorFlow backend for neural closure (`-DBUILD_ML=ON`)
+- Documentation build (`-DBUILD_DOC=ON`; requires Doxygen plus `doc/requirements.txt`)
 
 Get the source and submodules
 -----------------------------
@@ -57,8 +70,16 @@ MPI + CUDA build for HPC SN CUDA backend:
 .. code-block:: bash
 
    mkdir -p build_cuda
-   cmake -S . -B build_cuda -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=ON -DBUILD_ML=OFF
+   cmake -S . -B build_cuda -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=ON -DBUILD_HIP_HPC=OFF -DBUILD_ML=OFF
    cmake --build build_cuda -j
+
+MPI + ROCm/HIP build for HPC SN HIP backend:
+
+.. code-block:: bash
+
+   mkdir -p build_rocm
+   cmake -S . -B build_rocm -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=ON -DBUILD_CUDA_HPC=OFF -DBUILD_HIP_HPC=ON -DBUILD_ML=OFF
+   cmake --build build_rocm -j
 
 Build with tests:
 
@@ -102,3 +123,17 @@ Tests
 
    ./build_test/unit_tests
    ctest --test-dir build_test --output-on-failure
+
+Documentation
+-------------
+
+Install the Sphinx Python dependencies and build Doxygen plus Sphinx through
+CMake:
+
+.. code-block:: bash
+
+   python -m pip install -r doc/requirements.txt
+   cmake -S . -B build_doc -DCMAKE_BUILD_TYPE=Release -DBUILD_DOC=ON -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_HIP_HPC=OFF -DBUILD_ML=OFF
+   cmake --build build_doc -j
+
+The generated HTML entry point is `build_doc/docs/sphinx/index.html`.

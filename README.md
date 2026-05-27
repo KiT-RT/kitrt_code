@@ -19,6 +19,12 @@ KiT-RT has two layers:
 - `kitrt_code`: this C++ solver repository. Use it to build the solver, run one deterministic config, or extend solver internals.
 - `CharmKiT`: the Python workflow layer for lattice/hohlraum sweeps, SLURM submission, CSV inputs, and QOI collection.
 
+Prerequisites for the CPU smoke test:
+
+- C++17 compiler, CMake 3.16+, Git, and initialized submodules
+- OpenMP, BLAS, LAPACK, and VTK development libraries
+- Python 3.10+ for `tools/check_smoke_output.py`
+
 ### Ten-minute CPU smoke test
 
 ```bash
@@ -96,7 +102,7 @@ Applications include:
 ### Neural–PDE Integration
 
 * **Structure-Preserving Operator Learning** — *arXiv:2402.16613* \[[PDF](https://arxiv.org/abs/2402.16613)]
-* **Structure-preserving neural networks for entropy-based closure** — *Journal of Computational Physics* \[[DOI](https://doi.org/10.1016/j.jcp.2025.113967)], *ICML*  \[[Link]([https://doi.org/10.1016/j.jcp.2025.113967](https://proceedings.mlr.press/v162/schotthofer22a.html))], *AIAA*  \[[DOI](https://doi.org/10.2514/6.2021-2895)]
+* **Structure-preserving neural networks for entropy-based closure** — *Journal of Computational Physics* \[[DOI](https://doi.org/10.1016/j.jcp.2025.113967)], *ICML* \[[Link](https://proceedings.mlr.press/v162/schotthofer22a.html)], *AIAA* \[[DOI](https://doi.org/10.2514/6.2021-2895)]
 * [PhD Thesis: Synergies between Numerical Methods for Kinetic Equations and Neural Networks](https://doi.org/10.5445/IR/1000158838)
 
 
@@ -126,7 +132,8 @@ cd ..
 
 #### 1b) Docker installation
 ```bash
-docker run --rm -it -v $(pwd):/mnt -w /mnt kitrt/test:latest /bin/bash
+docker build -t kitrt/test:local tools/docker
+docker run --rm -it -v "$(pwd):/mnt" -w /mnt kitrt/test:local /bin/bash
 mkdir -p build_docker_omp
 cd build_docker_omp
 cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF ..
@@ -255,7 +262,7 @@ gcovr -r .. --html-details coverage.html
 
 ## Python API
 
-The Python interface is provided via [charm_kit](https://github.com/KiT-RT/charm_kit), allowing seamless integration into AI and outer-loop (UQ, Optimization) workflows. 
+The Python workflow interface is provided via [CharmKiT](https://github.com/KiT-RT/CharmKiT), allowing integration into AI and outer-loop (UQ, Optimization) workflows.
 Check the corresponding readme for further info.
 
 

@@ -1,5 +1,5 @@
 SphericalMonomials
-=============
+==================
 
 .. doxygenclass:: SphericalMonomials
    :members:

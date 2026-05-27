@@ -6,7 +6,7 @@ Release Notes
 =====
 
 The CMake project version is currently ``1.2.0``. Until GitHub releases and
-published container artifacts are available, cite the exact commit hash used for
+release container artifacts are available, cite the exact commit hash used for
 reproducibility.
 
 Recommended release artifacts

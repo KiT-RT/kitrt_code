@@ -15,6 +15,8 @@ Current onboarding status
 Release status
 --------------
 
-Until versioned GitHub releases and container artifacts are published, cite the
-exact Git commit used for a run and record local compiler/container details with
-your simulation outputs.
+Until versioned GitHub releases and release container artifacts are published,
+cite the exact Git commit used for a run and record local compiler/container
+details with your simulation outputs. CI or site-specific image tags may exist,
+but user-facing docs should prefer local image builds or explicitly provided SIF
+URIs.

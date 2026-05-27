@@ -9,6 +9,9 @@ checks.
 Build and run
 -------------
 
+This path requires the CPU build dependencies from :doc:`../installation`,
+including BLAS, LAPACK, VTK, OpenMP, and Python 3.10+ for the checker.
+
 .. code-block:: bash
 
    cmake -S . -B build_omp -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF
@@ -29,5 +32,5 @@ Common failures
 ---------------
 
 - ``MESH_FILE`` not found: run from the repository root and use ``examples/configs/smoke_test.cfg`` unchanged first.
-- Missing VTK/LAPACK/OpenMP libraries: install the development packages or use a container build.
+- Missing BLAS/LAPACK/VTK/OpenMP libraries: install the development packages or use a container build.
 - No CSV log: inspect solver stderr/stdout; the run likely failed before history output was written.
