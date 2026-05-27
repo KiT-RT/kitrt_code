@@ -33,7 +33,8 @@ Get the source and submodules
 Build examples
 --------------
 
-Run all commands from the repository root.
+Run all commands from the repository root. For a complete first-run walkthrough,
+see :doc:`tutorials/smoke_test`.
 
 CPU/OpenMP build (no MPI, no CUDA, no ML):
 
@@ -72,7 +73,14 @@ Run
 
 The executable is produced inside the build directory (for example, `build_omp/KiT-RT`).
 
-Single-process run:
+Single-process smoke test:
+
+.. code-block:: bash
+
+   ./build_omp/KiT-RT examples/configs/smoke_test.cfg
+   python tools/check_smoke_output.py examples/result/smoke_test
+
+Single-process validation config:
 
 .. code-block:: bash
 

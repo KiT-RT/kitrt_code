@@ -4,8 +4,8 @@ project = 'KiT-RT'
 copyright = '2022, Karlsruhe Institute of Technology'
 author = 'Jonas Kusch, Steffen Schotthöfer, Pia Stammer, Jannick Wolters, Tianbai Xiao'
 
-version = 'v0.1'
-release = 'v0.1'
+version = '1.2.0'
+release = '1.2.0'
 
 
 extensions = [
@@ -20,7 +20,7 @@ exclude_patterns = []
 html_theme = 'sphinx_rtd_theme'
 html_theme_options = {
     'logo_only': True,
-    'display_version': False
+    'display_version': True
 }
 html_logo = 'images/KiT-RT_logo_small.png'
 html_static_path = ['_static']

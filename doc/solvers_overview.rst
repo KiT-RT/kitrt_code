@@ -9,13 +9,15 @@ Runtime solver selection
 
 KiT-RT selects the execution path in `src/main.cpp`:
 
-- If `DATA_GENERATOR_MODE = YES`, it runs data generation.
-- Otherwise, if `HPC_SOLVER = YES`, it runs the HPC SN implementation:
-  - `SNSolverHPC` on CPU (`src/solvers/snsolver_hpc.cpp`)
-  - `SNSolverHPCCUDA` when CUDA is compiled and a GPU is detected
-    (`src/solvers/snsolver_hpc.cu`)
-- If `HPC_SOLVER = NO`, it uses `SolverBase::Create(...)` and the standard
-  solver factory (`src/solvers/solverbase.cpp`).
+- If ``DATA_GENERATOR_MODE = YES``, it runs data generation.
+- Otherwise, if ``HPC_SOLVER = YES``, it runs the HPC SN implementation:
+
+  - ``SNSolverHPC`` on CPU (``src/solvers/snsolver_hpc.cpp``)
+  - ``SNSolverHPCCUDA`` when CUDA is compiled and a GPU is detected
+    (``src/solvers/snsolver_hpc.cu``)
+
+- If ``HPC_SOLVER = NO``, it uses ``SolverBase::Create(...)`` and the standard
+  solver factory (``src/solvers/solverbase.cpp``).
 
 Non-HPC solver stack
 --------------------

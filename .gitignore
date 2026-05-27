@@ -1,6 +1,7 @@
 ### Project specific ###
 *.con
 *.cfg
+!examples/configs/smoke_test.cfg
 bin/*
 *.su2
 build_debug/*
