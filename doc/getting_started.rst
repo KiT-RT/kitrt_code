@@ -26,7 +26,8 @@ Ten-minute CPU path
 -------------------
 
 Run these commands from a fresh clone on a machine with the required CPU
-dependencies installed:
+dependencies installed. See :doc:`installation` for BLAS/LAPACK, VTK, and
+Python package requirements.
 
 .. code-block:: bash
 
@@ -45,7 +46,15 @@ details.
 Container path
 --------------
 
-Apptainer is supported through ``KITRT_CONTAINER_RUNTIME=apptainer``.
-Singularity remains supported through ``KITRT_CONTAINER_RUNTIME=singularity``.
-If your site does not permit root builds, use a prebuilt SIF or a remote pull
-URI instead of building containers on the cluster login node.
+Container definitions live under ``tools/singularity``. Apptainer is supported
+through ``KITRT_CONTAINER_RUNTIME=apptainer``; Singularity remains supported
+through ``KITRT_CONTAINER_RUNTIME=singularity``. A local CPU image can be built
+with:
+
+.. code-block:: bash
+
+   cd tools/singularity
+   KITRT_CONTAINER_RUNTIME=apptainer ./build_container.sh cpu
+
+If your site does not permit local SIF builds, use a site-provided image or a
+remote pull URI instead of building containers on the cluster login node.

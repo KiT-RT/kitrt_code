@@ -1,5 +1,5 @@
 QGaussLegendreTensorized2D
-========================
+===========================
 
 .. doxygenclass:: QGaussLegendreTensorized2D
    :members:

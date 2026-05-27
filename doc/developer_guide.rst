@@ -26,6 +26,20 @@ A typical local developer workflow is:
    ./build_dev/unit_tests
    ctest --test-dir build_dev --output-on-failure
 
+Documentation build
+-------------------
+
+A local Doxygen/Sphinx build uses the active CMake build directory for generated
+Doxygen XML:
+
+.. code-block:: bash
+
+   python -m pip install -r doc/requirements.txt
+   cmake -S . -B build_doc -DCMAKE_BUILD_TYPE=Release -DBUILD_DOC=ON -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_HIP_HPC=OFF -DBUILD_ML=OFF
+   cmake --build build_doc -j
+
+Open ``build_doc/docs/sphinx/index.html`` to inspect the generated docs.
+
 CI
 --
 

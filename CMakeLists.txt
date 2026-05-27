@@ -324,7 +324,7 @@ if( BUILD_DOC )
     set( SPHINX_BUILD ${CMAKE_CURRENT_BINARY_DIR}/docs/sphinx )
     set( SPHINX_INDEX_FILE ${SPHINX_BUILD}/index.html )
     add_custom_command( OUTPUT ${SPHINX_INDEX_FILE}
-                        COMMAND ${SPHINX_EXECUTABLE} ${SPHINX_SOURCE} ${SPHINX_BUILD}
+                        COMMAND ${CMAKE_COMMAND} -E env KITRT_DOXYGEN_XML=${DOXYGEN_OUTPUT_DIR}/xml ${SPHINX_EXECUTABLE} ${SPHINX_SOURCE} ${SPHINX_BUILD}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/doc/index.rst ${DOXYGEN_INDEX_FILE}
                         MAIN_DEPENDENCY ${SPHINX_SOURCE}/conf.py

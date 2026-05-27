@@ -592,7 +592,8 @@ void PrintLogHeader( std::string inputFile ) {
         log->info( "|   |_|\\_\\___| |_|     |_| \\_\\|_|                                      |" );
         log->info( "|                                                                      |" );
         log->info( "------------------------------------------------------------------------" );
-        log->info( "|  Copyright: MIT Licence                                              |" );
+        log->info( "|  Copyright: Steffen Schotthoefer, Pia Stammer, Jonas Kusch           |" );
+        log->info( "|  License: MIT License                                                |" );
         // log->info( "|  Authors: S. Schotthöfer, J. Kusch, J. Wolters, P. Stammer ad T. Xiao |" );
         log->info( "|  Date: 21th April 2022                                               |" );
         log->info( "------------------------------------------------------------------------" );

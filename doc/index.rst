@@ -15,7 +15,7 @@ Supported solver families
 - :math:`P_N` (spherical harmonics moments)
 - :math:`M_N` (entropy-closure moments, including normalized variant)
 - Continuous slowing-down (CSD) variants for :math:`S_N`, :math:`P_N`, and :math:`M_N`
-- HPC :math:`S_N` path (CPU MPI/OpenMP and optional CUDA backend)
+- HPC :math:`S_N` path (CPU MPI/OpenMP and optional CUDA or HIP backend)
 
 For a solver-focused overview (including numerical background references and
 code mapping), see :doc:`solvers_overview`.
@@ -32,6 +32,7 @@ Table of contents
    tutorials/smoke_test
    troubleshooting
    release
+   philosophy
    configFiles
    solvers_overview
    physics

@@ -12,9 +12,3 @@ Current onboarding status
 - Use :doc:`tutorials/smoke_test` for the laptop smoke test and expected output checks.
 - Use :doc:`troubleshooting` before opening an installation or cluster support issue.
 
-Release status
---------------
-
-Until versioned GitHub releases and container artifacts are published, cite the
-exact Git commit used for a run and record local compiler/container details with
-your simulation outputs.
