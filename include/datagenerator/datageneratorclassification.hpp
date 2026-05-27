@@ -27,14 +27,20 @@ class DataGeneratorClassification : public DataGeneratorBase
     // Helper functions
     virtual void ComputeMoments() override = 0; /*!< @brief Pre-Compute Moments at all quadrature points. */
     void ClassifyDensity(); /*!< @brief Checks, if the pdf of each Lagrange multiplier is within the KL distance of the maxwellian */
-    /*!< @brief Computes the Kullback Leibler Divergence of the pdfs f1 and f2, both pfds are evaluated at their quadrature points
-                  @param: f1,f2. Evaluation of the pdf at their quadrature points. length of vector must be _nq.
-             */
+
+    /*! @brief Computes the Kullback Leibler Divergence of the pdfs f1 and f2.
+     *
+     * Both pdfs are evaluated at their quadrature points and must have length _nq.
+     * @param f1 Evaluation of the first pdf at the quadrature points.
+     * @param f2 Evaluation of the second pdf at the quadrature points.
+     */
     double ComputeKLDivergence( Vector& f1, Vector& f2 );
-    /*!< @brief Evalutes the maxwellian at the quadrature points of _quadrature.
-         @param rho: density
-         @param u: bulk velocity
-         @param T: Temperature*/
+
+    /*! @brief Evaluates the Maxwellian at the quadrature points of _quadrature.
+     * @param rho Density.
+     * @param u Bulk velocity.
+     * @param T Temperature.
+     */
     Vector ComputeMaxwellian( double rho, double u, double T );
 
     /*!< @brief Computes the kinetic density from the given Lagrange multipliers alpha at the quadrature points.
