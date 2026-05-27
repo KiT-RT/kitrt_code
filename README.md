@@ -1,7 +1,7 @@
 # KiT-RT: Modular, HPC-Ready Radiative Transport Solver
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![GitHub Stars](https://img.shields.io/github/stars/KiT-RT/kitrt_code)](https://github.com/KiT-RT/kitrt_code/stargazers)
-[![Build Status](https://github.com/CSMMLab/KiT-RT/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/CSMMLab/KiT-RT/actions/workflows/c-cpp.yml)
+[![Build Status](https://github.com/KiT-RT/kitrt_code/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/KiT-RT/kitrt_code/actions/workflows/c-cpp.yml)
 [![Coverage Status](https://coveralls.io/repos/github/CSMMLab/KiT-RT/badge.svg?branch=master)](https://coveralls.io/github/CSMMLab/KiT-RT?branch=master)
 [![Docs](https://readthedocs.org/projects/kit-rt/badge/?version=latest)](https://kit-rt.readthedocs.io/en/latest/?badge=latest)
 
@@ -12,11 +12,45 @@ KiT-RT is an open-source, multi-fidelity **C++ PDE solver for radiative transpor
 
 
 
+## Start here
+
+KiT-RT has two layers:
+
+- `kitrt_code`: this C++ solver repository. Use it to build the solver, run one deterministic config, or extend solver internals.
+- `CharmKiT`: the Python workflow layer for lattice/hohlraum sweeps, SLURM submission, CSV inputs, and QOI collection.
+
+### Ten-minute CPU smoke test
+
+```bash
+git clone https://github.com/KiT-RT/kitrt_code.git
+cd kitrt_code
+git submodule update --init --recursive
+cmake -S . -B build_omp -DCMAKE_BUILD_TYPE=Release -DBUILD_MPI=OFF -DBUILD_CUDA_HPC=OFF -DBUILD_ML=OFF
+cmake --build build_omp -j
+./build_omp/KiT-RT examples/configs/smoke_test.cfg
+python tools/check_smoke_output.py examples/result/smoke_test
+```
+
+Expected result: `PASS`, at least one VTK/VTU file in `examples/result/smoke_test/`, and a finite mass in the CSV log. See `doc/tutorials/smoke_test.rst` for details.
+
+### I want sweeps or SLURM
+
+Use [CharmKiT](https://github.com/KiT-RT/CharmKiT):
+
+```bash
+poetry run charm-kit run lattice --singularity
+poetry run charm-kit submit lattice --cuda
+```
+
+### I am stuck
+
+See `doc/troubleshooting.rst` before opening an issue.
+
 ## Key Features
 
 * **Modular, HPC-ready** architecture. Supports hybrid **MPI/OpenMP distributed parallelism**.
-* **Containerized** for portable deployment across HPC systems (Docker & Singularity).
-* **Python-wrapped** via [charm_kit](https://github.com/KiT-RT/charm_kit)
+* **Containerized** for portable deployment across HPC systems (Docker, Apptainer, and Singularity).
+* **Python-wrapped** via [CharmKiT](https://github.com/KiT-RT/CharmKiT)
 * Downstream applications:
   - Data generation for scientific **foundation models**.
   - high-resolution **reference solutions** for AI-based surrogate modeling.

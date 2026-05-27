@@ -26,7 +26,12 @@ Table of contents
 .. toctree::
    :maxdepth: 1
 
+   status
+   getting_started
    installation
+   tutorials/smoke_test
+   troubleshooting
+   release
    configFiles
    solvers_overview
    physics
