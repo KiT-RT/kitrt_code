@@ -19,16 +19,13 @@ KiT-RT has two layers:
 - `kitrt_code`: this C++ solver repository. Use it to build the solver, run one deterministic config, or extend solver internals.
 - `CharmKiT`: the Python workflow layer for lattice/hohlraum sweeps, SLURM submission, CSV inputs, and QOI collection.
 
-<<<<<<< HEAD
+### Ten-minute CPU smoke test
+
 Prerequisites for the CPU smoke test:
 
 - C++17 compiler, CMake 3.16+, Git, and initialized submodules
 - OpenMP, BLAS, LAPACK, and VTK development libraries
 - Python 3.10+ for `tools/check_smoke_output.py`
-
-=======
->>>>>>> 79e9379a02585184b95f4031d61ae086a483267f
-### Ten-minute CPU smoke test
 
 ```bash
 git clone https://github.com/KiT-RT/kitrt_code.git
