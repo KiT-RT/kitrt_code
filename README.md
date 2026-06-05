@@ -75,7 +75,6 @@ KiT-RT has been adopted by research and engineering teams of:
 * Karlsruhe Institute of Technology
 * TU Delft
 * NMBU Norway
-* Chung-Ang University, Korea
 * RIKEN Japan
 
 
