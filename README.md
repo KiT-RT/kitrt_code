@@ -10,6 +10,27 @@
 
 KiT-RT is an open-source, multi-fidelity **C++ PDE solver for radiative transport** in fusion, fission, and radiation therapy simulations. Designed from the ground up for **AI-accelerated scientific computing**, it supports hybrid neural–PDE workflows, enabling high-resolution reference solutions, scalable data generation for scientific foundation models, and outer-loop workflows such as uncertainty quantification and design optimization.
 
+## Scientific Impact
+
+KiT-RT has been adopted by research and engineering teams of:
+
+* NVIDIA
+* Sandia National Labs
+* Lawrence Livermore National Labs
+* Oak Ridge National Labs
+* Karlsruhe Institute of Technology
+* TU Delft
+* NMBU Norway
+* RIKEN Japan
+
+
+Applications include:
+
+* Foundation model training for fusion simulation.
+* Large-scale UQ experiments.
+* Radiation therapy planning.
+* Accelerated neural network inference.
+* Reference dataset generation for ML-based surrogate models.
 
 
 ## Start here
@@ -64,27 +85,6 @@ See `doc/troubleshooting.rst` before opening an issue.
 
 
 
-## Scientific Impact
-
-KiT-RT has been adopted by research and engineering teams of:
-
-* NVIDIA
-* Sandia National Labs
-* Lawrence Livermore National Labs
-* Oak Ridge National Labs
-* Karlsruhe Institute of Technology
-* TU Delft
-* NMBU Norway
-* RIKEN Japan
-
-
-Applications include:
-
-* Foundation model training for fusion simulation.
-* Large-scale UQ experiments.
-* Radiation therapy planning.
-* Accelerated neural network inference.
-* Reference dataset generation for ML-based surrogate models.
 
 
 
